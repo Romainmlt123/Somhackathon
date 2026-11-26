@@ -13,13 +13,40 @@ Chaque option reçoit une **utilité** entre 0 et 1, calculée à partir du grap
 
 `Resultat.pour_journal()` donne les champs à passer à `journal.why(...)`, pour pouvoir relire chaque choix après la partie.
 
+## Branchement dans l'agent
+
+Le graphe est la seule source de connaissance du moteur de décision :
+
+```
+journal ──► graphe.observe ──► Contexte.depuis_graphe ──► evaluer ──► village/rules.py (do_vote, do_choice) ──► act
+```
+
+`Contexte.depuis_graphe` lit dans [graphe.py](graphe.py) : `p(loup)` de chaque joueur (`proba_loup`), les rôles certains (`A_LE_ROLE`), les vivants et les morts, le Capitaine (`capitaine()`), les accusations entendues (`nb_accusations`, arêtes `ACCUSE`), les rôles revendiqués (`pretentions`, arêtes `PRETEND_ETRE`), les partenaires loups (`loups_connus`), les potions déjà bues (`potions_utilisees`) et les inspections faites (`nb_inspections`).
+
+| Invitation | Qui décide | Repli |
+|---|---|---|
+| Vote du conseil, élection du Capitaine | Le moteur de probabilités (`Rules.do_vote`). Le modèle ne départage que si la confiance est sous 0,15 (`consulter_modele`), et seulement vers une option d'utilité supérieure à 0,05. | Le modèle seul, si le moteur ne rend rien. |
+| Inspection, potion, succession | Le moteur de probabilités (`Rules.do_choice`). | Le modèle, si la situation est ambiguë. |
+| Épreuve | `epreuves.py`, puis le modèle | — |
+
+L'agent qui joue est `run_agent.py` → [village/brain.py](village/brain.py) → [village/rules.py](village/rules.py), qui partage le même `Graphe` que le journal. Le corps historique [agent.py](agent.py) n'utilise plus le moteur de probabilités.
+
+Les règles C, V et L de l'étude sont intégrées aux utilités : chaque raison commence par son code (`V2`, `V7`, `L9`, `L10`…), que `Resultat.regle` extrait pour le journal.
+
+- **C2** : soi-même et les morts valent 0.
+- **V2** : loup certain = 1, innocent certain = 0, sinon `p(loup)` + un bonus de popularité (0,02 par accusation, plafonné à 0,1).
+- **V7** : un rôle à pouvoir déclaré dont `p(loup)` < 0,75 tombe à 0,3 × p.
+- **L9** : un allié vaut 0, sauf s'il est déjà condamné (au moins 2 accusations et le plus accusé) : 0,95.
+- **L10** : le loup vise un rôle à pouvoir déclaré (+0,2) ou l'innocent le plus accusé.
+- **V8** : inspection = 0,5 × p + 0,4 × entropie, +0,1 pour le Capitaine.
+
 ## Les invitations
 
 | `kind` | Qui | Quand | Options | Règle de notation |
 |---|---|---|---|---|
-| `captain_election` | Tous | Jour 1, 9 h-11 h, au feu | Un candidat (soi compris) | Village : confiance = 1 − p(loup) ; se choisir vaut 0,6. Loup : soi 0,9, un allié 0,8. |
+| `captain_election` | Tous | Jour 1, 9 h-11 h, au feu | Un candidat (soi compris) | Village : confiance = 1 − p(loup), moins la popularité des accusations. Loup : un allié 0,9, sinon le moins accusé. Jamais soi (C2). |
 | `council_vote` | Tous les vivants | Vote de 19 h à 21 h, au feu, bulletin définitif | Un candidat, même absent | Village : utilité = p(loup), puisque chaque vote contre un loup rapporte 1 point. Loup : jamais un allié ; vote pour l'innocent le plus soupçonné, pour rester crédible. |
-| `seer_inspect` | Voyante | 22 h-8 h, depuis sa maison, 2 par manche, 1 par nuit | Un habitant | Entropie de p(loup) : on inspecte là où l'on doute le plus. +0,15 pour le Capitaine. 0 si le rôle est déjà connu. |
+| `seer_inspect` | Voyante | 22 h-8 h, depuis sa maison, 2 par manche, 1 par nuit | Un habitant | Moitié soupçon, moitié entropie de p(loup). +0,1 pour le Capitaine. 0 si le rôle est déjà connu. |
 | `witch_potion` | Sorcière | Nuit, depuis sa maison, avant 8 h, 1 potion par nuit | `heal` sur une victime, `poison` sur un habitant, abstention | Vie : 0,9 − 0,8 × p(loup) de la victime, avec un bonus si c'est soi, le Capitaine ou la Voyante. Mort : seulement si p(loup) ≥ 0,8. Garder ses potions vaut 0,35. |
 | `witch_self_rescue` | Sorcière tuée chez elle | Nuit | Se sauver | Toujours oui. |
 | `captain_succession` | Capitaine mourant | 10 s | Un vivant | Village : 1 − p(loup). Loup : un allié. |
@@ -42,5 +69,4 @@ Chaque option reçoit une **utilité** entre 0 et 1, calculée à partir du grap
 
 - **Paroles du loup** : faut-il accuser un innocent ? Le moteur ne le note pas encore.
 - **Calibrage** : les poids et les seuils (0,7 pour accuser, 0,8 pour empoisonner, température) sont posés à la main. Il faudra les ajuster sur les journaux de vraies manches avec `python graphe.py traces/X.jsonl`.
-- **Popularité d'un candidat** : pour un loup, suivre le vote majoritaire serait mieux que suivre `p(loup)`. Il faudrait compter les accusations entendues (arêtes `ACCUSE`).
-- **Rôle du joueur** : `Contexte.depuis_graphe` le lit dans le graphe. S'il n'y est pas, il faut passer `mon_role=st.role`.
+- **Rôle du joueur** : `Contexte.depuis_graphe` le lit dans le graphe (`A_LE_ROLE` de soi) ; l'agent passe aussi `mon_role=self.role()`.

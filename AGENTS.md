@@ -85,7 +85,7 @@ Variables d'environnement : `TRACE=0` (pas de fichier), `TRACE_DIR`, `TRACE_SCAN
 Les règles C1-C9 (communes), V1-V12 (village) et L1-L13 (loup) de l'étude sont appliquées sans modèle par `moteur.py`. Chaque décision est journalisée avec son numéro : `jq 'select(.ev=="why") | [.decision, .regle, .motif]'`.
 
 - **Où aller** : `moteur.objectif()` (nuit à la maison, épreuve, conseil, pierre et chasse pour le loup).
-- **Qui viser** : `choisir_vote`, `choisir_inspection`, `choisir_potion`, `choisir_successeur`, à partir des soupçons du graphe.
+- **Qui viser** : dans `agent.py`, `choisir_vote`, `choisir_inspection`, `choisir_potion`, `choisir_successeur`, à partir des soupçons du graphe. L'agent de référence (`village/rules.py`) utilise `moteur_probas.evaluer` : voir plus bas.
 - **Quoi dire** : `Moteur.entendre` (réponses), `Moteur.au_conseil` (faits observés), toujours filtré par `nettoyer` (240 caractères, aucun secret, mots interdits du loup).
 - **Le modèle** n'est appelé que pour départager un vote incertain, reformuler une réponse quand on est interpellé, et les épreuves que `epreuves.py` ne reconnaît pas. Sans `--model`, l'agent joue entièrement en local.
 - **Limite connue** : le corps de `agent.py` ne sait se diriger que vers un repère visible ; sinon il explore au hasard. Le corps de la branche `romain` (`village/body.py`, navigation sur carte) pourrait exécuter les mêmes objectifs.
@@ -102,7 +102,7 @@ Les règles C1-C9 (communes), V1-V12 (village) et L1-L13 (loup) de l'étude sont
 
 L'agent à lancer est celui de Romain (`run_agent.py`, dossier `village/`). Il reprend nos modules :
 
-- **Votes, Voyante, Sorcière, succession** : `moteur_probas.evaluer` sur le graphe de soupçons ; le modèle ne départage que les cas serrés (`village/rules.py`, `do_vote`, `do_choice`).
+- **Votes, Voyante, Sorcière, succession** : `moteur_probas.evaluer` sur `Contexte.depuis_graphe` (soupçons, rôles certains, accusations, rôles revendiqués, Capitaine, potions bues, inspections faites). Les règles C, V et L sont intégrées aux utilités. Le modèle ne départage que les cas ambigus (`consulter_modele`), jamais vers une option exclue (`village/rules.py`, `do_vote`, `do_choice`). Voir [DECISIONS.md](DECISIONS.md).
 - **Épreuves** : `epreuves.resoudre` calcule d'abord en local (facture, modulo, SHA-256, premiers, provisions) ; le modèle n'est appelé que si l'énoncé n'est pas reconnu.
 - **Paroles** : filtrées par `moteur.nettoyer` (240 caractères, jamais le jeton, mots interdits du loup) et complétées par les réflexes de `moteur.Moteur` (`village/brain.py`).
 - **Graphe** : un seul `Graphe`, créé dans `run_agent.py` et partagé avec le cerveau.

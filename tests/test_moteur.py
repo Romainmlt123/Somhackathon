@@ -47,6 +47,69 @@ def choix(*noms):
     return [{"choice_id": f"v{i}", "label": n} for i, n in enumerate(noms, 1)]
 
 
+# ---------------------------------------------------------------------- graphe → probabilités
+
+import moteur_probas  # noqa: E402
+
+
+def demande(kind, action, *noms, abstain=False):
+    return {"kind": kind, "allow_abstain": abstain,
+            "actions": [{"action": action, "choices": choix(*noms)}]}
+
+
+def test_probas_lisent_le_graphe():
+    g = graphe_avec()
+    g.soupcon(g.id_joueur("Léa"), "vu_pres_pierre_nuit", {"n": 1, "t": 1})
+    g.joueur("Basile", capitaine=True)
+    ctx = moteur_probas.Contexte.depuis_graphe(g)
+    assert ctx.mon_nom == "Anne" and ctx.mon_role == "villageois"
+    assert ctx.capitaine == "Basile"
+    assert ctx.p("Léa") > ctx.p("Émile")
+    assert ctx.potion_vie and ctx.inspections_restantes == 2
+
+
+def test_vote_village_vise_le_plus_suspect_du_graphe():
+    g = graphe_avec()
+    g.soupcon(g.id_joueur("Léa"), "vu_pres_pierre_nuit", {"n": 1, "t": 1})
+    res = moteur_probas.evaluer(moteur_probas.Contexte.depuis_graphe(g),
+                                demande("council_vote", "vote", "Anne", "Basile", "Léa"))
+    assert res.meilleure == "v3" and res.regle == "V2"
+    assert res.utilites["v1"] == 0.0            # C2 : jamais soi
+
+
+def test_vote_village_epargne_un_role_a_pouvoir_declare():
+    g = graphe_avec()
+    dire(g, "Léa", "Je suis la voyante.")
+    ctx = moteur_probas.Contexte.depuis_graphe(g)
+    assert ctx.pouvoir_declare("Léa")
+    res = moteur_probas.evaluer(ctx, demande("council_vote", "vote", "Léa", "Émile"))
+    assert res.meilleure == "v2"                 # V7
+
+
+def test_vote_loup_jamais_un_allie():
+    g = graphe_avec(role="werewolf")
+    g.fixe_role(g.id_joueur("Léa"), "werewolf", {"n": 1, "t": 1}, "partenaire")
+    res = moteur_probas.evaluer(moteur_probas.Contexte.depuis_graphe(g),
+                                demande("council_vote", "vote", "Léa", "Émile"))
+    assert res.meilleure == "v2" and res.utilites["v1"] == 0.0
+
+
+def test_inspection_evite_les_roles_connus():
+    g = graphe_avec(role="seer")
+    g.fixe_role(g.id_joueur("Léa"), "villager", {"n": 1, "t": 1}, "inspection")
+    res = moteur_probas.evaluer(moteur_probas.Contexte.depuis_graphe(g),
+                                demande("seer_inspect", "inspect", "Léa", "Émile"))
+    assert res.meilleure == "v2"
+
+
+def test_potion_deja_utilisee_lue_dans_le_graphe():
+    g = graphe_avec(role="witch")
+    g.potions_utilisees.add("heal")
+    ctx = moteur_probas.Contexte.depuis_graphe(g)
+    res = moteur_probas.evaluer(ctx, demande("witch_potion", "heal", "Émile", abstain=True))
+    assert not ctx.potion_vie and res.meilleure == "abstain"
+
+
 # ---------------------------------------------------------------------- objectif
 
 def test_objectif_villageois_suit_les_horaires():

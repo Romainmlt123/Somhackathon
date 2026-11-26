@@ -256,7 +256,10 @@ class Rules:
             d = await self.ask(f"INVITATION {rq['kind']} (request_id={rq['request_id']}). Candidats :{nl}{lines}{indice}{nl}"
                                'Réponds {"reponse": "<choice_id>", "pensee": "pourquoi"}. Ne vote pas pour toi-même.')
             propose = str((d or {}).get("reponse"))
-            if propose in labels and labels[propose] != me and not (rq["kind"] == "council_vote" and self.protege(labels[propose])):
+            # Le modèle départage, mais jamais vers une option que le moteur exclut (allié loup, mort…).
+            acceptable = res is None or res.utilites.get(propose, 0) > 0.05
+            if (propose in labels and labels[propose] != me and acceptable
+                    and not (rq["kind"] == "council_vote" and self.protege(labels[propose]))):
                 pick_id, source = propose, "modele"
                 self.br.note(f"J'ai voté {labels[propose]} ({rq['kind']}): {str(d.get('pensee'))[:100]}")
         journal.why("vote", source=source, choice_id=pick_id, label=labels[pick_id], request_id=rq["request_id"],
