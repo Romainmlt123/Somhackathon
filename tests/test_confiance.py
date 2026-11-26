@@ -113,6 +113,23 @@ def test_parole_factuelle_et_convaincante():
     assert sans_fait.au_conseil("Anne", "villager") is None      # V3 : jamais d'accusation sans fait
 
 
+def test_le_loup_ne_cite_jamais_une_observation_de_nuit():
+    """Dire « j'ai vu X à 23 h » prouverait que le loup était dehors alors qu'un villageois dort."""
+    g = _graphe("werewolf")
+    g.observe({"ev": "in", "type": "snapshot", "n": 3, "t": time.time(), "data": {
+        "status": "alive", "clock": {"day": 1, "minute": 23 * 60}, "self": {"name": "Anne", "role": "werewolf"},
+        "visible": [{"ref": "f1", "kind": "campfire", "bearing_deg": 0, "distance_m": 6},
+                    {"ref": "p1", "kind": "person", "name": "Basile", "bearing_deg": 5, "distance_m": 6}],
+        "requests": []}})
+    g.minute = 19 * 60
+    assert moteur.fait_a_dire(g, exclure=["Anne"]) is not None                    # le villageois peut le dire
+    assert moteur.fait_a_dire(g, exclure=["Anne"], sans_nuit=True) is None        # le loup, non
+    m = moteur.Moteur(g)
+    assert m.au_conseil("Anne", "werewolf") is None                               # L7 : sans fait sûr, il se tait
+    rep = m.entendre({"kind": "speech", "speaker_name": "Léa", "text": "Anne, où étais-tu ?"}, "Anne", "werewolf")
+    assert "23:00" not in rep.texte and "Basile" not in rep.texte
+
+
 if __name__ == "__main__":
     for nom, fn in list(globals().items()):
         if nom.startswith("test_"):

@@ -297,8 +297,20 @@ def accusation_sans_fait(texte, noms):
     return None
 
 
-def fait_a_dire(graphe, exclure=()):
-    """V4 / L8 : notre observation la plus accablante, avec le nom, le lieu et l'heure."""
+def _de_nuit(preuve):
+    """Vrai si l'observation date de la nuit (22 h-8 h), ou si son heure est inconnue."""
+    h = preuve.get("heure")
+    if not h:
+        return True
+    minute = int(h[:2]) * 60 + int(h[3:5])
+    return minute >= NUIT or minute < REVEIL
+
+
+def fait_a_dire(graphe, exclure=(), sans_nuit=False):
+    """V4 / L8 : notre observation la plus accablante, avec le nom, le lieu et l'heure.
+
+    `sans_nuit` (loup) : une observation de nuit prouverait qu'on était dehors alors qu'un villageois dort ;
+    le loup ne cite donc que des observations de jour."""
     meilleur = None
     for jid, preuves in graphe.indices.items():
         node = graphe.noeuds.get(jid) or {}
@@ -306,6 +318,8 @@ def fait_a_dire(graphe, exclure=()):
             continue
         for preuve in preuves:
             if preuve.get("regle") not in FAITS_VUS or not preuve.get("lieu"):
+                continue
+            if sans_nuit and _de_nuit(preuve):
                 continue
             score = (graphe.proba_loup(jid), preuve.get("t") or 0)
             if meilleur is None or score > meilleur[0]:
@@ -406,7 +420,7 @@ class Moteur:
                 return Parole(f"C'est moi la Voyante. {orateur} ment : c'est un loup.", "L11")
         if interpelle(texte, moi):
             if self._une_fois(("C6", orateur, normaliser(texte)[:60])):
-                fait = fait_a_dire(self.g, exclure=[moi] + self.g.loups_connus())
+                fait = fait_a_dire(self.g, exclure=[moi] + self.g.loups_connus(), sans_nuit=loup)
                 reponse = f"{orateur}, je n'ai rien à cacher. " + (fait[1] if fait else "Et toi, qu'as-tu vu ?")
                 return Parole(reponse, "C6", besoin_modele=True, question=f"{orateur} : {confiance.neutraliser(texte)}")
             return None
@@ -435,7 +449,7 @@ class Moteur:
         if role_de(role) == "loup":
             if ("L8", jour) in self.deja:
                 return None
-            fait = fait_a_dire(self.g, exclure=[moi] + partenaires)
+            fait = fait_a_dire(self.g, exclure=[moi] + partenaires, sans_nuit=True)
             if not fait:
                 return None   # L7 : sans fait, le loup se tait
             cible, phrase = fait
