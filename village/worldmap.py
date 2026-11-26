@@ -25,6 +25,8 @@ class WorldMap:
         self.pose = (0.0, 0.0, 0.0)
         self.fixed = False      # la pose vient-elle d'un repère connu (vs estimée à l'aveugle) ?
         self.tentative = False  # pose rechargée du disque : à confirmer par un repère
+        self.heading_known = True   # faux après s'être assis : le serveur tourne l'habitant d'un angle inconnu
+        self.pending_turns = 0      # pivots envoyés et pas encore confirmés : les perceptions en cours sont ambiguës
         self.fix_t = 0.0
         self.motion = None      # (gait, direction absolue en degrés) du mouvement en cours
         self._t = time.time()
@@ -64,6 +66,38 @@ class WorldMap:
         x, y, th = self.pose
         self.pose = (x, y, norm(th + angle))
 
+    def turn_sent(self, angle):
+        """Pivot envoyé : le cap suit l'ordre, et les perceptions sont ignorées jusqu'à la confirmation (certaines
+        décrivent encore l'ancien cap)."""
+        self.note_turn(angle)
+        self.pending_turns += 1
+
+    def turn_done(self, ok, angle):
+        self.pending_turns = max(0, self.pending_turns - 1)
+        if ok is False:                     # refusé : le cap n'a pas changé
+            self.note_turn(-angle)
+
+    def heading_lost(self):
+        """S'asseoir tourne l'habitant vers le banc d'un angle que l'agent ne connaît pas."""
+        self.heading_known = False
+
+    def teleport_home(self, house_name):
+        """Retour à la maison : le serveur pose l'habitant au centre de sa maison, face à son lit. Pose exacte si la maison
+        et son lit sont sur la carte, sinon pose perdue jusqu'au prochain alignement sur deux repères."""
+        self.motion = None
+        house = next((r for r, v in self.landmarks.items() if v["kind"] == "house" and v.get("name") == house_name), None)
+        if house:
+            hx, hy = self.landmarks[house]["x"], self.landmarks[house]["y"]
+            beds = [(math.hypot(v["x"] - hx, v["y"] - hy), v) for r, v in self.landmarks.items()
+                    if v["kind"] == "bed" and 0.3 < math.hypot(v["x"] - hx, v["y"] - hy) < 2.5]
+            if beds:
+                bed = min(beds, key=lambda t: t[0])[1]
+                self.pose = (hx, hy, math.degrees(math.atan2(bed["x"] - hx, bed["y"] - hy)))
+                self.fixed, self.tentative, self.heading_known = True, False, True
+                return True
+        self.lose_pose()
+        return False
+
     def set_motion(self, gait, bearing=0.0):
         self.advance()
         # le serveur fixe la direction dans le monde à l'instant de l'ordre : un `turn` ultérieur ne la change pas
@@ -77,6 +111,8 @@ class WorldMap:
         """Met à jour la pose et la carte avec les observations d'un même instant."""
         now = now or time.time()
         self.advance(now)
+        if self.pending_turns:
+            return
         statics = [o for o in observations if o["kind"] in STATIC_KINDS]
         if not statics:
             return
@@ -88,8 +124,8 @@ class WorldMap:
             pairs = [((self.landmarks[o["ref"]]["x"], self.landmarks[o["ref"]]["y"]),
                       polar_to_local(o["bearing_deg"], o["distance_m"])) for o in known]
             self.pose = solve_pose(pairs)
-            self.fixed = True
-        elif len(known) == 1 and (self.fixed or self.tentative):
+            self.fixed = self.heading_known = True
+        elif len(known) == 1 and (self.fixed or self.tentative) and self.heading_known:
             o = known[0]
             lm = self.landmarks[o["ref"]]
             cand = pose_from_one((lm["x"], lm["y"]), polar_to_local(o["bearing_deg"], o["distance_m"]), self.pose[2])
@@ -115,6 +151,12 @@ class WorldMap:
     def _distinct(obs):
         a = polar_to_local(obs[0]["bearing_deg"], obs[0]["distance_m"])
         return any(math.dist(a, polar_to_local(o["bearing_deg"], o["distance_m"])) > 0.05 for o in obs[1:])
+
+    @property
+    def usable(self):
+        """Pose exploitable pour naviguer : confirmée par un repère, ou rechargée après une reconnexion (l'habitant
+        s'est arrêté sur place) tant qu'aucun repère ne la contredit."""
+        return self.fixed or self.tentative
 
     # ---- requêtes
     def xy(self, ref):

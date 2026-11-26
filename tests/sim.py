@@ -70,12 +70,12 @@ class House:
 
 
 class Sim:
-    def __init__(self, role="villager", minute=1380, start=(0.0, -12.0), heading=0.0):
+    def __init__(self, role="villager", minute=1380, start=(0.0, -12.0), heading=0.0, cycle_ms=10 ** 9):
         self.houses = [House(4, 14, 8, "W"), House(5, -10, 6, "S"), House(6, 12, -4, "N"), House(7, -14, -8, "E")]
-        self.static = {"campfire": (0.0, 0.0), "board": (4.0, -3.0), "stone": (0.0, 28.0)}
+        self.static = {"campfire": (0.0, 0.0), "board": (4.0, -3.0), "stone": (0.0, 28.0), "canteen": (18.0, 14.0)}
         self.benches = {f"bench{i+1}": p for i, p in enumerate([(-3, -2), (3, 2.5), (-2.5, 3), (4, -0.5)])}
         self.persons = {"p1": ("Léa", (6.0, -11.0)), "p2": ("Basile", (-5.0, 18.0)), "p3": ("Émile", (-12.5, 6.8))}
-        self.role, self.minute = role, minute
+        self.role, self.minute, self.cycle_ms = role, minute, cycle_ms   # cycle_ms énorme : horloge figée dans les tests
         self.x, self.y, self.heading = start[0], start[1], heading
         self.gait, self.bearing, self.posture, self.form = "stop", 0.0, "standing", "human"
         self.blocked = False
@@ -88,6 +88,16 @@ class Sim:
         self.log = []
         self.ws = None
         self.round = {"round_id": "r1", "mode": "trial", "day": 1}
+        self.requests = {}          # request_id -> demande ouverte
+        self.responses = []         # (request_id, action, data) acceptées
+        self.refusals = []          # (action, code)
+        self.spoken = []            # paroles émises par l'agent
+        self.muted = False
+        self.dead = False
+        self.last_speak = 0.0
+        self.clock_speed = 0.0      # minutes de jeu par seconde réelle (0 = horloge figée)
+        self.challenge_pt = (18.0, 14.0)
+        self.person_posture = {}
 
     # ---- géométrie
     def obstacles(self):
@@ -150,7 +160,7 @@ class Sim:
         for ref, p in self.static.items():
             add(ref, ref, p)
         for ref, (name, p) in self.persons.items():
-            add(ref, "person", p, name=name, posture="standing", engaged=True)
+            add(ref, "person", p, name=name, posture=self.person_posture.get(ref, "standing"), engaged=True)
         return out
 
     def ray_to(self, pos):
@@ -181,6 +191,8 @@ class Sim:
         h = next(h for h in self.houses if h.n == self.home)
         if abs(self.x - h.cx) < h.HALF and abs(self.y - h.cy) < h.HALF:
             z.append("home")
+        if math.hypot(self.x - self.challenge_pt[0], self.y - self.challenge_pt[1]) < 6:
+            z.append("challenge")
         return z
 
     def self_msg(self):
@@ -191,8 +203,33 @@ class Sim:
                 "motion_reason": "blocked" if self.blocked else None}
 
     def snapshot(self):
-        return {"status": "alive", "self": self.self_msg(), "clock": {"day": 1, "minute": self.minute, "cycle_ms": 600000},
+        return {"status": "alive", "self": self.self_msg(), "clock": {"day": 1, "minute": self.minute, "cycle_ms": self.cycle_ms},
                 "round": self.round, "visible": list(self.visible_now().values()), "scan": self.scan_now(), "requests": []}
+
+    # ---- pilotage par les tests : événements, invitations, sons
+    async def emit(self, kind, **data):
+        await self.send("game_event", {"kind": kind, **data})
+
+    async def open_request(self, kind, actions, seconds=30, prompt=None, allow_abstain=False):
+        rid = f"{kind}-{len(self.requests) + len(self.responses) + 1}"
+        d = {"request_id": rid, "kind": kind, "deadline_ms": int(time.time() * 1000 + seconds * 1000),
+             "allow_abstain": allow_abstain, "actions": actions}
+        if prompt:
+            d["prompt"] = prompt
+        self.requests[rid] = d
+        await self.send("decision_request", d)
+        return rid
+
+    async def npc_say(self, name, text, sector="front", volume="say", speaker_ref=None):
+        d = {"kind": "speech", "volume": volume, "sector": sector, "text": text}
+        if speaker_ref:
+            d.update(speaker_ref=speaker_ref, speaker_name=name)
+        await self.send("sound", d)
+
+    async def kill_player(self):
+        self.dead = True
+        self.gait = "stop"
+        await self.send("snapshot", {"status": "dead", "requests": []})
 
     # ---- simulation
     async def send(self, kind, data):
@@ -211,9 +248,40 @@ class Sim:
         v = self.visible_now().get(ref)
         return v if v and v["distance_m"] <= reach else None
 
+    async def refuse(self, cid, action, code):
+        self.refusals.append((action, code))
+        await self.result(cid, False, code)
+
+    async def respond(self, cid, a, d):
+        rq = self.requests.get(d.get("request_id"))
+        if not rq or time.time() * 1000 > rq["deadline_ms"]:
+            return await self.refuse(cid, a, "request_closed")
+        offered = {x["action"]: x for x in rq["actions"]}
+        if a == "abstain":
+            if not rq["allow_abstain"]:
+                return await self.refuse(cid, a, "action_unavailable")
+        elif a not in offered:
+            return await self.refuse(cid, a, "action_unavailable")
+        if a == "vote" and "council" not in self.zones():
+            return await self.refuse(cid, a, "outside_council")
+        if a == "answer_challenge" and "challenge" not in self.zones():
+            return await self.refuse(cid, a, "outside_challenge")
+        if a in ("inspect", "heal", "poison") and "home" not in self.zones():
+            return await self.refuse(cid, a, "outside_home")
+        if a in ("vote", "inspect", "heal", "poison", "name_successor"):
+            if d.get("choice_id") not in [c["choice_id"] for c in offered[a].get("choices", [])]:
+                return await self.refuse(cid, a, "invalid_payload")
+        self.requests.pop(rq["request_id"])
+        self.responses.append((rq["request_id"], a, d))
+        await self.result(cid, True, value={"role": "wolf"} if a == "inspect" else None)
+
     async def act(self, cid, d):
         a = d["action"]
         ref = d.get("target_ref")
+        if self.dead and a not in ("vote", "heal", "poison", "name_successor", "abstain"):
+            return await self.refuse(cid, a, "dead")
+        if a in ("vote", "inspect", "heal", "poison", "name_successor", "answer_challenge", "abstain"):
+            return await self.respond(cid, a, d)
         if a in ("sit", "sleep", "read_board", "write_board", "transform", "attack"):
             v = self.adjacent(ref) if ref else None
             if not v:
@@ -222,6 +290,7 @@ class Sim:
             if v["kind"] != "bench":
                 return await self.result(cid, False, "out_of_reach")
             self.posture = "sitting"
+            self.heading = (self.heading + 37.0) % 360       # s'asseoir tourne l'habitant vers le banc d'un angle que l'agent ignore
         elif a == "sleep":
             if v["kind"] != "bed":
                 return await self.result(cid, False, "out_of_reach")
@@ -273,7 +342,18 @@ class Sim:
         elif t == "turn":
             self.heading = (self.heading + d["angle_deg"]) % 360
             await self.result(cid, True)
-        elif t in ("speak", "emote"):
+        elif t == "speak":
+            now = time.time()
+            if self.muted:
+                return await self.refuse(cid, "speak", "muted")
+            if not 1 <= len(d.get("text", "")) <= 240 or d.get("volume") not in ("whisper", "say", "shout"):
+                return await self.refuse(cid, "speak", "invalid_payload")
+            if now - self.last_speak < 2.0:
+                return await self.refuse(cid, "speak", "rate_limited")
+            self.last_speak = now
+            self.spoken.append((self.minute, d["volume"], d["text"]))
+            await self.result(cid, True)
+        elif t == "emote":
             await self.result(cid, True)
         elif t == "act":
             await self.act(cid, d)
@@ -284,10 +364,16 @@ class Sim:
         last_scan = None
         while True:
             await asyncio.sleep(dt)
-            self.minute = (self.minute + dt * 2.4 / 60) % 1440 if getattr(self, "run_clock", False) else self.minute
+            if self.clock_speed:
+                old = self.minute
+                self.minute = (self.minute + dt * self.clock_speed) % 1440
+                for step, at in (("nightfall", 1320), ("village_wakes", 480)):
+                    crossed = (old < at <= self.minute) if old <= self.minute else (old < at or at <= self.minute)
+                    if crossed:
+                        await self.emit("scheduled_step", step=step, place="campfire", text=step)
             if self.return_at and time.time() * 1000 >= self.return_at:
                 h = next(h for h in self.houses if h.n == self.home)
-                self.x, self.y = h.cx + 0.3, h.cy - 0.8
+                self.x, self.y = h.cx, h.cy               # le serveur pose l'habitant au centre de sa maison
                 bx, by = h.bed[0] - self.x, h.bed[1] - self.y
                 self.heading = math.degrees(math.atan2(bx, by))
                 self.return_at = None

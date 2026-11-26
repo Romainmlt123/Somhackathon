@@ -15,6 +15,7 @@ from pathlib import Path
 from .geometry import local_to_world, polar_to_local
 from .llm import parse_json
 from .persona import system_prompt
+from .rules import Rules
 
 log = logging.getLogger("village.brain")
 
@@ -42,6 +43,7 @@ class Brain:
         self.history = deque(maxlen=6)         # (action, résultat)
         self.last_say = 0.0
         self.fail_streak = 0
+        self.rules = Rules(self)
         self.decisions = open(Path(log_dir) / f"agent-{int(time.time())}.jsonl", "w", buffering=1)
         self._load()
 
@@ -74,11 +76,13 @@ class Brain:
             await asyncio.sleep(1.0)
             w = self.st.world
             for v in list(self.st.visible.values()):
+                if v["kind"] == "wolf" and v.get("name") and self.st.role == "wolf":
+                    self.rules.meute.add(v["name"])          # un loup ne nomme que ses semblables
                 if v["kind"] not in PEOPLE or v["kind"] == "game_master":
                     continue
                 key = v.get("name") or f"inconnu({v['kind']} {v['ref'][:4]})"
                 near = None
-                if w.fixed:
+                if w.usable:
                     pt = local_to_world(polar_to_local(v["bearing_deg"], v["distance_m"]), w.pose)
                     cands = [(((pt[0] - lm["x"]) ** 2 + (pt[1] - lm["y"]) ** 2) ** 0.5, r) for r, lm in w.landmarks.items()
                              if lm["kind"] not in ("door", "bed")]
@@ -96,6 +100,7 @@ class Brain:
         while True:
             f = await self.s.events.get()
             k, d = f["type"], f["data"]
+            self.rules.on_event(k, d)
             if k == "sound" and d.get("kind") == "speech":
                 who = d.get("speaker_name") or ("un loup" if d.get("speaker_ref") and d.get("source") != "game_master" else None)
                 if d.get("source") == "game_master":
@@ -127,7 +132,7 @@ class Brain:
             rows.append((v["ref"], v["kind"], f"{v['ref']} ({v['kind']}{' ' + extra if extra else ''}) angle {v['bearing_deg']:.0f}° dist {v['distance_m']:.1f} m"))
         lines.append("TU VOIS: " + ("; ".join(r[2] for r in rows[:16]) if rows else "rien d'identifiable"))
         places = []
-        if w.fixed:
+        if w.usable:
             home = self.b.home_ref()
             for r in list(KNOWN_PLACES) + ([home] if home else []):
                 p = w.polar_to(r)
@@ -146,7 +151,7 @@ class Brain:
         if self.notes:
             lines.append("TES NOTES:\n  " + "\n  ".join(f"[{n['t']}] {n['txt']}" for n in list(self.notes)[-12:]))
         for rid, rq in st.requests.items():
-            left = max(0, (rq["deadline_ms"] - time.time() * 1000) / 1000)
+            left = max(0, (rq["deadline_ms"] - st.now_ms()) / 1000)
             acts = []
             for a in rq.get("actions", []):
                 ch = ", ".join(f"{c['choice_id']}={c['label']}" for c in a.get("choices", []))
@@ -281,24 +286,27 @@ class Brain:
                 await self.st.wait_change(1.0)
             log.info("Cerveau actif : %s, modèle %s", self.st.me.get("name"), self.llm.model)
             while True:
-                if not self.st.alive:
-                    await self.st.wait_change(1.0)
-                    continue
-                if self.st.posture == "sleeping" and not self.st.requests:
-                    await asyncio.sleep(2)          # endormi : rien ne se perçoit ; on se réveille au matin
-                    if not self.st.is_night():
-                        await self.b.stand()
+                try:
+                    if await self.rules.tick():          # gère aussi l'habitant mort (autosauvetage, succession)
+                        await asyncio.sleep(0.2)
+                        continue
+                except Exception:
+                    log.exception("erreur de réflexe")
+                    await self.b.stop()
+                    await asyncio.sleep(1.0)
                     continue
                 t0 = time.time()
                 ctx, raw, usage, d, err = await self.decide()
                 say = str(d.get("dire") or "").strip()
-                if say and time.time() - self.last_say > 2.2 and self.st.posture != "sleeping":
+                if say and time.time() - self.last_say > 2.2 and self.st.posture != "sleeping" and time.time() > self.rules.mute_until:
                     r = await self.b.speak(say, d.get("volume") if d.get("volume") in ("whisper", "say", "shout") else "say")
                     self.last_say = time.time()
+                    if r.get("code") == "muted":
+                        self.rules.mute_until = time.time() + 60
                     log.info("DIT (%s) %s -> %s", d.get("volume", "say"), say, r.get("ok") or r.get("code"))
                 self.note(d.get("note"))
                 try:
-                    result = await asyncio.wait_for(self.execute(d), 80)
+                    result = self.rules.veto(d) or await asyncio.wait_for(self.execute(d), 80)
                 except asyncio.TimeoutError:
                     result = "trop long, interrompu"
                 except Exception as e:                      # une erreur de corps ne doit jamais tuer l'agent

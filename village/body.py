@@ -13,7 +13,8 @@ import math
 import random
 import time
 
-from .geometry import norm, world_to_polar
+from .geometry import local_to_world, norm, polar_to_local, world_to_polar
+from .grid import ray
 
 log = logging.getLogger("village.body")
 
@@ -50,6 +51,7 @@ class Body:
         self.st = session.state
         self.w = self.st.world
         self.last_move = None       # (gait, bearing) dernier ordre de marche envoyé
+        self.last_dir = 0.0
 
     # ------------------------------------------------------------ commandes brutes
     async def _act(self, action, **kw):
@@ -62,6 +64,7 @@ class Body:
         if self.last_move == (gait, round(bearing)) and self.st.gait == gait:
             return {"ok": True}
         self.last_move = (gait, round(bearing))
+        self.last_dir = norm(self.w.pose[2] + bearing)      # direction absolue du dernier ordre de marche
         self.w.set_motion(gait, bearing)
         return await self.s.send("move", {"gait": gait, "bearing_deg": float(bearing)})
 
@@ -74,9 +77,14 @@ class Body:
         """Pivote de `angle` degrés (instantané côté serveur)."""
         if abs(angle) < 0.5:
             return {"ok": True}
-        self.w.note_turn(angle)          # le cap estimé suit l'ordre sans attendre l'accusé
-        self.last_move = None      # un pivot change le sens du « bearing » relatif : on réémettra le prochain move
-        return await self.s.send("turn", {"angle_deg": float(norm(angle))})
+        angle = float(norm(angle))
+        if angle >= 180:
+            angle = -180.0                  # le protocole exclut +180
+        self.w.turn_sent(angle)          # le cap suit l'ordre ; les perceptions sont ignorées jusqu'à l'accusé
+        self.last_move = None            # un pivot change le sens du « bearing » relatif : on réémettra le prochain move
+        res = await self.s.send("turn", {"angle_deg": angle})
+        self.w.turn_done(res.get("ok") if res.get("ok") is not None else True, angle)
+        return res
 
     async def speak(self, text, volume="say"):
         return await self.s.send("speak", {"volume": volume, "text": text[:240]})
@@ -145,12 +153,12 @@ class Body:
             v = self.st.visible.get(target)
             if v:
                 return v["bearing_deg"], v["distance_m"], "vision"
-            if self.w.fixed:
+            if self.w.usable:
                 p = self.w.polar_to(target)
                 if p:
                     return p[0], p[1], "carte"
             return None
-        if target is not None and self.w.fixed:
+        if target is not None and self.w.usable:
             b, d = world_to_polar(target, self.w.pose)
             return b, d, "carte"
         return None
@@ -173,14 +181,27 @@ class Body:
         return a, c
 
     # ------------------------------------------------------------ navigation
+    def target_world(self, target, b, d):
+        """Point du monde (x, y) de la cible : observation visible (exacte), sinon carte, sinon point donné."""
+        if callable(target):
+            target = target()
+        if isinstance(target, str):
+            if target in self.st.visible and self.w.usable:
+                return local_to_world(polar_to_local(b, d), self.w.pose)
+            return self.w.xy(target)
+        return target
+
     async def goto(self, target, stop=1.5, gait="walk", timeout=40.0, through=0.0):
-        """Marche jusqu'à `stop` mètres de la cible en contournant les obstacles.
-        through > 0 : on vise un passage (porte) et on exige de voir au moins `through` m au-delà.
-        Renvoie True si arrivé."""
+        """Marche jusqu'à `stop` mètres de la cible. Trajet A* sur la grille d'obstacles, évitement réactif par le scan.
+        through > 0 : on vise un passage (porte) et on exige de voir au moins `through` m au-delà. True si arrivé."""
+        if not self.w.heading_known:
+            await self.localize()               # le cap est perdu (après s'être assis) : tour d'horizon sur deux repères
+        grid = self.st.grid
         t0 = time.time()
         stuck_since = None
         last_dist = None
         no_progress_t = time.time()
+        path, path_t, path_goal = None, 0.0, None
         while time.time() - t0 < timeout:
             if not self.st.alive or self.st.posture != "standing":
                 await self.stop()
@@ -193,23 +214,40 @@ class Body:
             if d <= stop:
                 await self.stop()
                 return True
+            # trajet : on suit le point le plus lointain atteignable en ligne droite sur le plan A*
+            steer_b, dd, final = b, d, True
+            tw = self.target_world(target, b, d) if d > 3.0 and self.w.usable and grid.walls else None
+            if tw is not None:
+                now = time.time()
+                if path is None or now - path_t > 0.9 or math.dist(path_goal, tw) > 1.0:
+                    grid.forget_heurts(now)
+                    path, path_t, path_goal = grid.plan(self.w.pose[:2], tw, tol=max(stop, 0.3)), now, tw
+                wp = grid.waypoint(self.w.pose[:2], path)
+                if wp is not None:
+                    steer_b, dd = world_to_polar(wp, self.w.pose)
+                    final = math.dist(wp, tw) < 0.6
             # le but est-il hors du cône de vue ? on pivote (instantané) pour le remettre devant
-            if abs(b) > 35:
-                await self.turn(b)
-                self.last_move = None
+            if abs(steer_b) > 35:
+                await self.turn(steer_b)
                 await self.st.wait_change(0.05)
                 continue
-            need = min(2.5, max(0.8, d - stop)) + through
-            a, clear = self.choose_direction(b, need)
+            need = min(2.5, max(0.8, dd - (stop if final else 0.3))) + (through if final else 0.0)
+            a, clear = self.choose_direction(steer_b, need)
             if self.st.me.get("motion_reason") == "blocked" or clear < 0.6:
                 stuck_since = stuck_since or time.time()
                 if time.time() - stuck_since > 0.35:
+                    if self.st.me.get("motion_reason") == "blocked" and self.w.usable:
+                        for off in (-40, 0, 40):    # un corps accroche souvent un angle que le rayon central déclare libre
+                            px, py, _ = self.w.pose
+                            dx, dy = ray(self.last_dir + off, 0.5)
+                            grid.mark_heurt((px + dx, py + dy), time.time() + 25)
+                    path = None
                     await self.unstick()
                     stuck_since = None
                     continue
             else:
                 stuck_since = None
-            await self.move(gait, a if clear >= 0.6 else a)
+            await self.move(gait, a)
             if last_dist is None or d < last_dist - 0.15:
                 last_dist, no_progress_t = d, time.time()
             elif time.time() - no_progress_t > 6.0:
@@ -270,6 +308,7 @@ class Body:
         ref = ref or self._nearest_ref("bench")
         res = await self._interact("sit", ref) if ref else {"ok": False, "code": "no_bench"}
         if res.get("ok"):
+            self.w.heading_lost()        # s'asseoir tourne l'habitant d'un angle inconnu : le cap sera retrouvé sur 2 repères
             await self._wait(lambda: self.st.posture == "sitting", 2.0)
         return res
 
@@ -304,7 +343,7 @@ class Body:
         v = self.st.nearest(kind)
         if v:
             return v["ref"]
-        return self.w.nearest(kind) if self.w.fixed else None
+        return self.w.nearest(kind) if self.w.usable else None
 
     # ------------------------------------------------------------ maisons
     async def enter(self, house, timeout=60.0):
@@ -358,7 +397,7 @@ class Body:
         """Retrouve sa pose sur la carte : tour d'horizon sur place en notant chaque repère connu avec le
         pivot cumulé (la position ne change pas), puis alignement rigide. True si la pose est retrouvée."""
         from .geometry import polar_to_local, solve_pose
-        if self.w.fixed:
+        if self.w.fixed and self.w.heading_known:
             return True
         await self.stop()
         seen = {}                                   # ref -> point local ramené au cap initial
@@ -378,7 +417,7 @@ class Body:
             return False
         pairs = [((self.w.landmarks[r]["x"], self.w.landmarks[r]["y"]), p) for r, p in seen.items()]
         x, y, th = solve_pose(pairs)
-        self.w.pose, self.w.fixed = (x, y, norm(th + total)), True
+        self.w.pose, self.w.fixed, self.w.heading_known = (x, y, norm(th + total)), True, True
         return True
 
     # ------------------------------------------------------------ exploration
@@ -386,26 +425,18 @@ class Body:
         """Parcourt le village en préférant les zones jamais visitées, et complète la carte.
         S'arrête quand `until()` est vrai ou quand le budget de temps est écoulé."""
         t0 = time.time()
-        visited = {}
-        cell = lambda p: (round(p[0] / 4), round(p[1] / 4))
         while time.time() - t0 < budget and not (until and until()):
-            if not self.w.fixed and not await self.localize():
+            if not self.w.usable and not await self.localize():
                 await self.unstick()
                 continue
-            x, y, _ = self.w.pose
-            visited[cell((x, y))] = visited.get(cell((x, y)), 0) + 1
-            best, best_score = None, None
-            for k in range(12):
-                ang = math.radians(k * 30 + random.uniform(-10, 10))
-                p = (x + leg * math.sin(ang), y + leg * math.cos(ang))
-                near = sum(visited.get((cell(p)[0] + dx, cell(p)[1] + dy), 0) for dx in (-1, 0, 1) for dy in (-1, 0, 1))
-                score = near + random.uniform(0, 0.8)
-                if best_score is None or score < best_score:
-                    best, best_score = p, score
-            await self.goto(best, stop=1.5, gait=gait, timeout=18)
-            if self.w.fixed:
+            anchors = [(v["x"], v["y"]) for v in self.w.landmarks.values()]
+            best = self.st.grid.frontier(self.w.pose[:2], anchors)
+            if best is None:                                 # tout est balayé : direction au hasard
                 x, y, _ = self.w.pose
-                visited[cell((x, y))] = visited.get(cell((x, y)), 0) + 2
+                ang = random.uniform(0, 360)
+                best = (x + leg * math.sin(math.radians(ang)), y + leg * math.cos(math.radians(ang)))
+            if not await self.goto(best, stop=2.5, gait=gait, timeout=25):
+                self.st.grid.drop(best)                      # zone inaccessible : on n'y retourne pas
             self.w.save()
         await self.stop()
         return until() if until else True
