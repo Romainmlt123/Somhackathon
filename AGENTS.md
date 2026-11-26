@@ -97,3 +97,14 @@ Les règles C1-C9 (communes), V1-V12 (village) et L1-L13 (loup) de l'étude sont
 - Code, commentaires et commits en français, avec les accents.
 - Ne versionnez jamais `.env`, qui contient `TEAM_TOKEN`. Le journal masque les clés `authorization`, `token` et `api_key`.
 - Les appels au modèle coûtent du crédit : la marche et les délais se traitent localement, et seuls les choix (votes, épreuves) vont au modèle.
+
+## Agent de référence : `run_agent.py` (branche `romain-hugues`)
+
+L'agent à lancer est celui de Romain (`run_agent.py`, dossier `village/`). Il reprend nos modules :
+
+- **Votes, Voyante, Sorcière, succession** : `moteur_probas.evaluer` sur le graphe de soupçons ; le modèle ne départage que les cas serrés (`village/rules.py`, `do_vote`, `do_choice`).
+- **Épreuves** : `epreuves.resoudre` calcule d'abord en local (facture, modulo, SHA-256, premiers, provisions) ; le modèle n'est appelé que si l'énoncé n'est pas reconnu.
+- **Paroles** : filtrées par `moteur.nettoyer` (240 caractères, jamais le jeton, mots interdits du loup) et complétées par les réflexes de `moteur.Moteur` (`village/brain.py`).
+- **Graphe** : un seul `Graphe`, créé dans `run_agent.py` et partagé avec le cerveau.
+
+`agent.py` et `client.py` (ancien agent de Thomas) restent pour l'instant : un seul des deux peut se connecter (HTTP 409).

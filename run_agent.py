@@ -32,10 +32,8 @@ def usage():
         return json.load(r)
 
 
-async def observabilite(st):
+async def observabilite(st, graphe):
     """Écrit régulièrement l'état de l'agent dans le journal, et le graphe à côté du journal."""
-    graphe = Graphe()
-    journal.subscribe(graphe.observe)
     while True:
         await asyncio.sleep(15)
         journal.state(name=st.me.get("name"), role=st.role, posture=st.posture, zones=st.zones,
@@ -63,7 +61,9 @@ async def main():
     raw = open(ROOT / "logs" / f"agent-{ts}.raw.jsonl", "w", buffering=1)
     s = Session(a.url or os.environ["GAME_WS_URL"], os.environ["TEAM_TOKEN"], "brain-1", st, log=raw)
     body, llm = Body(s), LLM(a.model)
-    brain = Brain(s, body, llm, Path(a.persona).read_text().strip(), ROOT / "data", ROOT / "logs", a.max_appels)
+    graphe = Graphe()                       # un seul graphe : lu par le cerveau, écrit à côté du journal
+    journal.subscribe(graphe.observe)
+    brain = Brain(s, body, llm, Path(a.persona).read_text().strip(), ROOT / "data", ROOT / "logs", a.max_appels, graphe=graphe)
 
     async def saver():
         while True:
@@ -72,7 +72,7 @@ async def main():
             st.world.save(force=st.world.fixed)
     journal.session("start", agent_version="brain-1", model=llm.model, trace=str(journal.path()))
     print("Journal :", journal.path(), flush=True)
-    tasks = [asyncio.create_task(c) for c in (s.run(), brain.run(), saver(), observabilite(st))]
+    tasks = [asyncio.create_task(c) for c in (s.run(), brain.run(), saver(), observabilite(st, graphe))]
     try:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for t in done:

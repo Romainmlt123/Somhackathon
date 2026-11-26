@@ -34,7 +34,7 @@ NOMBRE = r"\d[\d\s  _]*\d|\d"
 DEBUT_DOC = re.compile(r"-{2,}\s*D[ÉE]BUT DU DOCUMENT\s*-{2,}", re.I)
 FIN_DOC = re.compile(r"-{2,}\s*FIN DU DOCUMENT\s*-{2,}", re.I)
 TOTAL = re.compile(r"total\s+[àa]\s+payer", re.I)
-MONTANT = re.compile(r"(\d[\d\s  .]*(?:,\d{1,2})?|\d+(?:\.\d{1,2})?)\s*(€|eur|euros?|\$)?", re.I)
+MONTANT = re.compile(r"(\d[\d\s.]*\d|\d)(,\d{1,2})?")   # \s couvre aussi les espaces insécables
 
 
 def facture(prompt):
@@ -45,7 +45,9 @@ def facture(prompt):
     doc = prompt[debut.end():fin.start() if fin and fin.start() > debut.end() else len(prompt)]
     lignes = [l for l in doc.splitlines()]
     colonnes = re.compile(r"\S( {2,}|\t)\S")   # « | a | b | », tabulations ou colonnes alignées
-    tableau = [i for i, l in enumerate(lignes) if l.count("|") >= 2 or colonnes.search(l)]
+    rangee = re.compile(r"^[^:|]*\S\s+\d+(?:[.,]\d+)?(?:\s*(?:€|eur|euros?|\$))?\s*$", re.I)   # « Pain 2 4,00 »
+    tableau = [i for i, l in enumerate(lignes) if l.count("|") >= 2 or colonnes.search(l)
+               or (rangee.match(l.strip()) and not TOTAL.search(l))]
     candidates = [i for i, l in enumerate(lignes) if TOTAL.search(l)]
     if not candidates:
         return None
@@ -64,13 +66,12 @@ def facture(prompt):
         ligne = lignes[apres[0]]
     else:
         return None   # tableau introuvable : le « Total » peut être un leurre, on s'abstient
-    reste = ligne[TOTAL.search(ligne).end():]
+    reste = re.sub(r"\(.*?\)", " ", ligne[TOTAL.search(ligne).end():])   # « (TTC) », « (TVA 20 %) »
     m = MONTANT.search(reste)
     if not m:
         return None
-    montant = m.group(1).strip().rstrip(".")
-    devise = m.group(2) or ""
-    return (montant + (" " + devise if devise else "")).strip()
+    # Le montant seul, sans devise ni espace de milliers : « 1 234,50 € » devient « 1234,50 ».
+    return re.sub(r"\s", "", m.group(1)).rstrip(".") + (m.group(2) or "")
 
 
 # ---------------------------------------------------------------------- calculs exacts
@@ -166,10 +167,11 @@ def provisions(prompt, action):
     lots = []
     for c in action.get("choices") or []:
         label = _norm(c.get("label") or "")
-        prix = re.search(rf"({NOMBRE})\s*(?:pieces?|po\b|ecus?|\$|€)", label) or \
-            re.search(rf"(?:prix|cout)\s*:?\s*({NOMBRE})", label)
-        portions = re.search(rf"({NOMBRE})\s*(?:portions?|parts?|personnes?|rations?)", label) or \
-            re.search(rf"(?:portions?|nourrit)\s*:?\s*({NOMBRE})", label)
+        # Le mot-clé avant le nombre prime : « prix 40 portions 10 » ne doit pas lire 40 comme des portions.
+        prix = (re.search(rf"(?:prix|cout)\s*:?\s*({NOMBRE})", label)
+                or re.search(rf"({NOMBRE})\s*(?:pieces?|po\b|ecus?|\$|€)", label))
+        portions = (re.search(rf"(?:portions?|parts?|rations?|nourrit)\s*:?\s*({NOMBRE})", label)
+                    or re.search(rf"({NOMBRE})\s*(?:portions?|parts?|personnes?|rations?)", label))
         if not prix or not portions:
             return None
         lots.append((c["choice_id"], _entier(prix.group(1)), _entier(portions.group(1))))

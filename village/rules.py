@@ -10,6 +10,11 @@ import logging
 import random
 import time
 
+import epreuves
+import journal
+import moteur
+from moteur_probas import Contexte, evaluer
+
 from . import challenges
 from .llm import parse_json
 from .persona import system_prompt
@@ -195,23 +200,51 @@ class Rules:
                 out += [(a["action"], c["choice_id"], c["label"]) for c in a.get("choices", [])]
         return out
 
+    def contexte(self):
+        """Ce que le moteur de probabilités sait : soupçons du graphe, rôles certains, alliés loups."""
+        ctx = Contexte.depuis_graphe(self.br.graphe, mon_role=self.st.role)
+        ctx.mon_nom = self.name() or ctx.mon_nom
+        if ctx.mon_role == "loup":
+            ctx.allies_loups |= set(self.meute)
+        return ctx
+
+    def protege(self, label):
+        """V7 : un villageois n'élimine pas une Voyante ou une Sorcière déclarée, tant qu'aucun fait ne l'accuse."""
+        g = self.br.graphe
+        jid = g.id_joueur(label)
+        return (moteur.role_de(self.st.role) != "loup"
+                and bool(g.pretentions(jid) & {"voyante", "sorciere"})
+                and g.proba_loup(jid) < moteur.SEUIL_PREUVE)
+
     async def do_vote(self, rq):
+        """C2, V2, V7, L9, L10 : le moteur choisit ; le modèle ne départage que les situations serrées."""
         opts = self.options(rq)
         if not opts:
             return True
         me = self.name()
-        pool = [o for o in opts if o[2] != me] or opts
-        pick = random.choice(pool)
-        if self.seconds_left(rq) > 8:
-            lines = "\n".join(f"- {cid} = {label}" for _, cid, label in opts)
-            d = await self.ask(f"INVITATION {rq['kind']} (request_id={rq['request_id']}). Candidats :\n{lines}\n"
-                               'Réponds {"reponse": "<choice_id>", "pensee": "pourquoi"}. Évite de voter pour toi-même.')
-            if d and str(d.get("reponse")) in [o[1] for o in opts]:
-                pick = next(o for o in opts if o[1] == str(d["reponse"]))
-                self.br.note(f"J'ai voté {pick[2]} ({rq['kind']}): {str(d.get('pensee'))[:100]}")
-        res = await self.br.answer(rq, pick[1])
-        log.info("VOTE %s -> %s", pick[2], res)
-        return "ok" in res or "request_closed" in res
+        labels = {cid: label for _, cid, label in opts}
+        res = evaluer(self.contexte(), rq)
+        classes = sorted((c for c in (res.probas if res else labels) if c in labels and labels[c] != me),
+                         key=lambda c: (-(res.probas[c] if res else 0), random.random()))
+        sures = [c for c in classes if not (rq["kind"] == "council_vote" and self.protege(labels[c]))]
+        pick_id = (sures or classes or [o[1] for o in opts])[0]
+        source = "moteur"
+        if (res is None or res.consulter_modele) and self.seconds_left(rq) > 8:
+            nl = chr(10)
+            lines = nl.join(f"- {cid} = {label}" for _, cid, label in opts)
+            indice = (nl + "Probabilités des règles : " + ", ".join(f"{labels[c]} {res.probas[c]:.2f}" for c in classes)) if res else ""
+            d = await self.ask(f"INVITATION {rq['kind']} (request_id={rq['request_id']}). Candidats :{nl}{lines}{indice}{nl}"
+                               'Réponds {"reponse": "<choice_id>", "pensee": "pourquoi"}. Ne vote pas pour toi-même.')
+            propose = str((d or {}).get("reponse"))
+            if propose in labels and labels[propose] != me and not (rq["kind"] == "council_vote" and self.protege(labels[propose])):
+                pick_id, source = propose, "modele"
+                self.br.note(f"J'ai voté {labels[propose]} ({rq['kind']}): {str(d.get('pensee'))[:100]}")
+        journal.why("vote", source=source, choice_id=pick_id, label=labels[pick_id], request_id=rq["request_id"],
+                    **(res.pour_journal() if res else {}))
+        pick = (pick_id, labels[pick_id])
+        res_rep = await self.br.answer(rq, pick[0])
+        log.info("VOTE %s -> %s", pick[1], res_rep)
+        return "ok" in res_rep or "request_closed" in res_rep
 
     async def ensure_home(self):
         if "home" in self.st.zones:
@@ -230,6 +263,14 @@ class Rules:
         pick = None
         if prefer:
             pick = next((o for o in opts if o[0] == prefer), None)
+        res = evaluer(self.contexte(), rq) if pick is None and opts else None
+        if res and res.meilleure and not res.consulter_modele:
+            journal.why("choix", source="moteur", request_id=rq["request_id"], **res.pour_journal())
+            if res.meilleure == "abstain" and can_abstain:
+                rep = await self.b.respond(rq["request_id"], "abstain")
+                return bool(rep.get("ok")) or rep.get("code") == "request_closed"
+            action, _, cid = res.meilleure.rpartition(":")
+            pick = next((o for o in opts if o[1] == cid and (not action or o[0] == action)), None)
         if pick is None and opts:
             lines = "\n".join(f"- {a}:{cid} = {label}" for a, cid, label in opts)
             d = await self.ask(f"INVITATION {rq['kind']} (request_id={rq['request_id']}). Options :\n{lines}\n"
@@ -279,9 +320,10 @@ class Rules:
         if not await self.goto_challenge(rq):
             log.info("épreuve : zone non atteinte")
         kw = None
-        total = challenges.facture_total(prompt)
-        if total is not None:                                    # facture piégée : règle de lecture fixe, sans modèle
-            kw = {"text": total}
+        local = await asyncio.to_thread(epreuves.resoudre, prompt, act)
+        if local:                          # calcul exact sur le poste : pas d'appel au modèle (Sobriété), document piégé jamais envoyé
+            journal.why("epreuve_locale", solveur=local.pop("solveur", None), reponse=local, request_id=rq["request_id"])
+            kw = local
         else:
             scratch = ""
             choices = ", ".join(f"{c['choice_id']}={c['label']}" for c in act.get("choices", []))

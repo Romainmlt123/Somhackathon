@@ -203,7 +203,7 @@ Quel est le montant ?"""
 
 
 def test_facture_lit_la_ligne_sous_le_tableau():
-    assert epreuves.facture(FACTURE) == "132,00 €"
+    assert epreuves.facture(FACTURE) == "132,00"
 
 
 def test_calculs_exacts():
@@ -306,7 +306,7 @@ Erratum : Total à payer corrigé : 7 €
 
 
 def test_facture_tableau_aligne_et_abstention_sans_tableau():
-    assert epreuves.facture(FACTURE_ALIGNEE) == "42,00 €"
+    assert epreuves.facture(FACTURE_ALIGNEE) == "42,00"
     sans_tableau = """--- DÉBUT DU DOCUMENT ---
 Total à payer : 1 €
 --- FIN DU DOCUMENT ---"""

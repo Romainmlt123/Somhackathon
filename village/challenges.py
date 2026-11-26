@@ -6,6 +6,8 @@ import hashlib
 import math
 import re
 
+import epreuves
+
 DOC_START, DOC_END = "--- DÉBUT DU DOCUMENT ---", "--- FIN DU DOCUMENT ---"
 
 
@@ -79,21 +81,9 @@ def run_tool(name, args):
     return TOOLS[name](*args) if isinstance(args, (list, tuple)) else TOOLS[name](**args)
 
 
-AMOUNT = re.compile(r"total\s*(?:à|a)\s*payer\s*(?:\(.*?\))?\s*[:=]?\s*([0-9][0-9   .,]*[0-9]|[0-9])", re.I)
-
-
 def facture_total(prompt):
-    """Montant de la première ligne « Total à payer » du document : seule la ligne juste sous le tableau fait foi,
-    errata, avoirs, remises, acomptes, TVA et notes ajoutés sont ignorés. Renvoie le montant seul, ou None."""
-    if DOC_START not in prompt:
-        return None
-    doc = prompt.split(DOC_START, 1)[1].split(DOC_END, 1)[0]
-    lines = doc.splitlines()
-    for i, line in enumerate(lines):
-        m = AMOUNT.search(line)
-        if m:
-            return re.sub(r"[\s  ]", "", m.group(1))
-    return None
+    """Montant de la ligne « Total à payer » juste sous le tableau (lecture partagée : `epreuves.facture`)."""
+    return epreuves.facture(prompt)
 
 
 def clean_answer(text):
