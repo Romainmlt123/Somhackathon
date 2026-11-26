@@ -9,3 +9,4 @@ venv/
 graphify-out/
 logs/
 .pytest_cache/
+traces/

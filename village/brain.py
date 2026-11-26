@@ -7,10 +7,15 @@ Tout est journalisé (logs/agent-*.jsonl) : contexte envoyé, réponse brute, ac
 import asyncio
 import json
 import logging
+import os
 import random
 import time
 from collections import deque
 from pathlib import Path
+
+import journal
+import moteur
+from graphe import Graphe
 
 from .geometry import local_to_world, polar_to_local
 from .llm import parse_json
@@ -29,7 +34,7 @@ def hhmm(minute):
 
 
 class Brain:
-    def __init__(self, session, body, llm, persona_text, data_dir, log_dir, max_calls=300, min_interval=1.5):
+    def __init__(self, session, body, llm, persona_text, data_dir, log_dir, max_calls=300, min_interval=1.5, graphe=None):
         self.s, self.st, self.b, self.llm = session, session.state, body, llm
         self.persona_text = persona_text
         self.max_calls, self.min_interval = max_calls, min_interval
@@ -43,6 +48,12 @@ class Brain:
         self.history = deque(maxlen=6)         # (action, résultat)
         self.last_say = 0.0
         self.fail_streak = 0
+        # Graphe de soupçons (partagé avec l'observabilité) et réflexes de parole du moteur de règles.
+        self.graphe = graphe or Graphe()
+        if graphe is None:
+            journal.subscribe(self.graphe.observe)
+        self.moteur = moteur.Moteur(self.graphe, secrets=(os.environ.get('TEAM_TOKEN'),))
+        self.paroles = deque(maxlen=3)         # réponses du moteur (C6, V5, L11) à dire avant tout
         self.rules = Rules(self)
         self.decisions = open(Path(log_dir) / f"agent-{int(time.time())}.jsonl", "w", buffering=1)
         self._load()
@@ -99,8 +110,16 @@ class Brain:
         """Consomme la file d'événements du serveur."""
         while True:
             f = await self.s.events.get()
+            journal.handled(f)
             k, d = f["type"], f["data"]
             self.rules.on_event(k, d)
+            self.sync_clock()
+            if k == 'game_event':
+                self.moteur.evenement(d)
+            elif k == 'sound' and d.get('kind') == 'speech':
+                reponse = self.moteur.entendre(d, self.st.me.get('name'), self.st.role)
+                if reponse:
+                    self.paroles.append(reponse)
             if k == "sound" and d.get("kind") == "speech":
                 who = d.get("speaker_name") or ("un loup" if d.get("speaker_ref") and d.get("source") != "game_master" else None)
                 if d.get("source") == "game_master":
@@ -111,6 +130,27 @@ class Brain:
                 self.events.append(f"{hhmm(self.st.minute)} {d.get('kind')}: {d.get('text') or json.dumps({x: y for x, y in d.items() if x != 'kind'}, ensure_ascii=False)[:140]}")
             elif k == "decision_request":
                 self.wake.set()
+
+    def sync_clock(self):
+        """L'horloge de l'état (extrapolée) alimente le moteur de règles."""
+        if self.st.minute is not None:
+            self.graphe.minute = int(self.st.minute) % 1440
+
+    def parole_moteur(self):
+        """Parole décidée par les règles (réponse, fait observé, annonce de la Voyante), ou None."""
+        if time.time() - self.last_say <= 2.2 or self.st.posture == 'sleeping':
+            return None
+        self.sync_clock()
+        if self.paroles:
+            return self.paroles.popleft()
+        m, nom, role = self.st.minute, self.st.me.get('name'), self.st.role
+        if m is None:
+            return None
+        if 'council' in self.st.zones and moteur.CONSEIL <= m < moteur.VOTE_FIN:
+            return self.moteur.au_conseil(nom, role)
+        if 'challenge' in self.st.zones:
+            return self.moteur.a_l_epreuve(nom, role)
+        return None
 
     # ------------------------------------------------------------ contexte
     def context(self):
@@ -297,9 +337,19 @@ class Brain:
                     continue
                 t0 = time.time()
                 ctx, raw, usage, d, err = await self.decide()
-                say = str(d.get("dire") or "").strip()
+                journal.why(str(d.get("action", "attendre")), cible=d.get("cible"), pensee=d.get("pensee"),
+                            dire=d.get("dire"), erreur=err, heure=hhmm(self.st.minute))
+                say, volume, regle = str(d.get("dire") or "").strip(), d.get("volume"), None
+                parole = self.parole_moteur()
+                if parole:
+                    say, volume, regle = parole.texte, parole.volume, parole.regle
+                # C5, C7, L4 : 240 caractères, jamais le jeton, aucun mot qui trahit un loup.
+                filtre = moteur.nettoyer(say, self.moteur.secrets, self.st.role, self.rules.meute) if say else None
+                if say and filtre is None:
+                    journal.why("silence", regle=regle or "L4", brouillon=say[:80])
+                say = filtre or ""
                 if say and time.time() - self.last_say > 2.2 and self.st.posture != "sleeping" and time.time() > self.rules.mute_until:
-                    r = await self.b.speak(say, d.get("volume") if d.get("volume") in ("whisper", "say", "shout") else "say")
+                    r = await self.b.speak(say, volume if volume in ("whisper", "say", "shout") else "say")
                     self.last_say = time.time()
                     if r.get("code") == "muted":
                         self.rules.mute_until = time.time() + 60
@@ -320,6 +370,8 @@ class Brain:
                     await self.b.explore(budget=8)
                     self.fail_streak = 0
                 self.history.append((f"{d.get('action')} {d.get('cible') or ''}".strip(), result))
+                journal.event("resultat", action=d.get("action"), cible=d.get("cible"), result=result,
+                              cout_total=round(self.llm.cost, 6), appels=self.llm.calls)
                 log.info("[%s] %s | %s %s -> %s", hhmm(self.st.minute), d.get("pensee"), d.get("action"), d.get("cible") or "", result)
                 self.decisions.write(json.dumps({"t": time.time(), "hour": hhmm(self.st.minute), "context": ctx, "raw": raw,
                                                  "decision": d, "result": result, "usage": usage, "error": err,
