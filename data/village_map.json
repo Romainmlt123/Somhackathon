@@ -1,0 +1,339 @@
+{
+ "landmarks": {
+  "bed-h10": {
+   "x": 6.838,
+   "y": -10.642,
+   "kind": "bed"
+  },
+  "bed-h11": {
+   "x": 14.065,
+   "y": -10.756,
+   "kind": "bed"
+  },
+  "bed-h12": {
+   "x": 20.566,
+   "y": -7.852,
+   "kind": "bed"
+  },
+  "bed-h13": {
+   "x": 27.585,
+   "y": -7.091,
+   "kind": "bed"
+  },
+  "bed-h2": {
+   "x": 19.092,
+   "y": 26.127,
+   "kind": "bed"
+  },
+  "bed-h3": {
+   "x": -7.91,
+   "y": 9.188,
+   "kind": "bed"
+  },
+  "bed-h4": {
+   "x": 21.929,
+   "y": 18.575,
+   "kind": "bed"
+  },
+  "bed-h5": {
+   "x": -4.432,
+   "y": 1.748,
+   "kind": "bed"
+  },
+  "bed-h6": {
+   "x": 22.179,
+   "y": 10.409,
+   "kind": "bed"
+  },
+  "bed-h7": {
+   "x": -3.713,
+   "y": -6.307,
+   "kind": "bed"
+  },
+  "bed-h8": {
+   "x": 25.215,
+   "y": 2.92,
+   "kind": "bed"
+  },
+  "bed-h9": {
+   "x": 0.34,
+   "y": -13.558,
+   "kind": "bed"
+  },
+  "bench-canteen-1": {
+   "x": 13.017,
+   "y": 35.429,
+   "kind": "bench"
+  },
+  "bench-canteen-2": {
+   "x": 17.195,
+   "y": 36.432,
+   "kind": "bench"
+  },
+  "bench-canteen-3": {
+   "x": 12.596,
+   "y": 37.176,
+   "kind": "bench"
+  },
+  "bench-canteen-4": {
+   "x": 16.776,
+   "y": 38.182,
+   "kind": "bench"
+  },
+  "bench-chapel-1": {
+   "x": -11.458,
+   "y": 28.45,
+   "kind": "bench"
+  },
+  "bench-chapel-2": {
+   "x": -8.397,
+   "y": 29.169,
+   "kind": "bench"
+  },
+  "bench-chapel-3": {
+   "x": -11.788,
+   "y": 29.857,
+   "kind": "bench"
+  },
+  "bench-chapel-4": {
+   "x": -8.729,
+   "y": 30.578,
+   "kind": "bench"
+  },
+  "bench-chapel-5": {
+   "x": -12.124,
+   "y": 31.271,
+   "kind": "bench"
+  },
+  "bench-chapel-6": {
+   "x": -9.057,
+   "y": 31.996,
+   "kind": "bench"
+  },
+  "bench-chapel-7": {
+   "x": -12.457,
+   "y": 32.679,
+   "kind": "bench"
+  },
+  "bench-chapel-8": {
+   "x": -9.391,
+   "y": 33.406,
+   "kind": "bench"
+  },
+  "bench1": {
+   "x": 4.632,
+   "y": 9.194,
+   "kind": "bench"
+  },
+  "bench2": {
+   "x": 11.244,
+   "y": 10.779,
+   "kind": "bench"
+  },
+  "bench3": {
+   "x": 7.148,
+   "y": 13.296,
+   "kind": "bench"
+  },
+  "bench4": {
+   "x": 8.728,
+   "y": 6.68,
+   "kind": "bench"
+  },
+  "board": {
+   "x": 4.719,
+   "y": 2.008,
+   "kind": "board"
+  },
+  "campfire": {
+   "x": 7.938,
+   "y": 9.991,
+   "kind": "campfire"
+  },
+  "canteen": {
+   "x": 14.893,
+   "y": 36.808,
+   "kind": "canteen",
+   "name": "Cantine"
+  },
+  "chapel": {
+   "x": -10.487,
+   "y": 31.198,
+   "kind": "chapel",
+   "name": "Chapelle"
+  },
+  "d-canteen": {
+   "x": 15.696,
+   "y": 33.487,
+   "kind": "door",
+   "of": "canteen"
+  },
+  "d-chapel": {
+   "x": -9.337,
+   "y": 26.351,
+   "kind": "door",
+   "of": "chapel"
+  },
+  "d-h1": {
+   "x": -6.877,
+   "y": 19.349,
+   "kind": "door",
+   "of": "h1"
+  },
+  "d-h10": {
+   "x": 4.678,
+   "y": -8.732,
+   "kind": "door",
+   "of": "h10"
+  },
+  "d-h11": {
+   "x": 11.904,
+   "y": -8.836,
+   "kind": "door",
+   "of": "h11"
+  },
+  "d-h12": {
+   "x": 18.403,
+   "y": -5.932,
+   "kind": "door",
+   "of": "h12"
+  },
+  "d-h13": {
+   "x": 25.42,
+   "y": -5.177,
+   "kind": "door",
+   "of": "h13"
+  },
+  "d-h2": {
+   "x": 17.174,
+   "y": 23.968,
+   "kind": "door",
+   "of": "h2"
+  },
+  "d-h3": {
+   "x": -5.993,
+   "y": 11.338,
+   "kind": "door",
+   "of": "h3"
+  },
+  "d-h4": {
+   "x": 20.006,
+   "y": 16.42,
+   "kind": "door",
+   "of": "h4"
+  },
+  "d-h5": {
+   "x": -2.516,
+   "y": 3.911,
+   "kind": "door",
+   "of": "h5"
+  },
+  "d-h6": {
+   "x": 20.259,
+   "y": 8.255,
+   "kind": "door",
+   "of": "h6"
+  },
+  "d-h7": {
+   "x": -1.803,
+   "y": -4.15,
+   "kind": "door",
+   "of": "h7"
+  },
+  "d-h8": {
+   "x": 23.28,
+   "y": 0.752,
+   "kind": "door",
+   "of": "h8"
+  },
+  "d-h9": {
+   "x": -1.814,
+   "y": -11.64,
+   "kind": "door",
+   "of": "h9"
+  },
+  "h1": {
+   "x": -8.466,
+   "y": 18.406,
+   "kind": "house",
+   "name": "Maison nº 1"
+  },
+  "h10": {
+   "x": 5.627,
+   "y": -10.313,
+   "kind": "house",
+   "name": "Maison nº 10"
+  },
+  "h11": {
+   "x": 12.85,
+   "y": -10.423,
+   "kind": "house",
+   "name": "Maison nº 11"
+  },
+  "h12": {
+   "x": 19.358,
+   "y": -7.521,
+   "kind": "house",
+   "name": "Maison nº 12"
+  },
+  "h13": {
+   "x": 26.371,
+   "y": -6.772,
+   "kind": "house",
+   "name": "Maison nº 13"
+  },
+  "h2": {
+   "x": 18.766,
+   "y": 24.918,
+   "kind": "house",
+   "name": "Maison nº 2"
+  },
+  "h3": {
+   "x": -7.583,
+   "y": 10.395,
+   "kind": "house",
+   "name": "Maison nº 3"
+  },
+  "h4": {
+   "x": 21.598,
+   "y": 17.367,
+   "kind": "house",
+   "name": "Maison nº 4"
+  },
+  "h5": {
+   "x": -4.102,
+   "y": 2.962,
+   "kind": "house",
+   "name": "Maison nº 5"
+  },
+  "h6": {
+   "x": 21.851,
+   "y": 9.194,
+   "kind": "house",
+   "name": "Maison nº 6"
+  },
+  "h7": {
+   "x": -3.386,
+   "y": -5.101,
+   "kind": "house",
+   "name": "Maison nº 7"
+  },
+  "h8": {
+   "x": 24.873,
+   "y": 1.692,
+   "kind": "house",
+   "name": "Maison nº 8"
+  },
+  "h9": {
+   "x": -0.877,
+   "y": -13.22,
+   "kind": "house",
+   "name": "Maison nº 9"
+  }
+ },
+ "pose": [
+  11.316,
+  38.131,
+  -52.064
+ ]
+}
