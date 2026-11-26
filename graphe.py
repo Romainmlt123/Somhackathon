@@ -127,6 +127,8 @@ class Graphe:
         self.paroles = []           # dernières paroles, relues quand un nouveau joueur apparaît
         self.accusations = []       # (orateur, cible, mots, t), pour repérer les miroirs (V6)
         self.miroirs = set()        # paires d'orateurs déjà signalées
+        self.potions_utilisees = set()   # "heal" / "poison" acceptés par le serveur, cette manche
+        self.nb_inspections = 0          # inspections de Voyante acceptées, cette manche
 
     # ------------------------------------------------------------------ construction
 
@@ -448,6 +450,10 @@ class Graphe:
         if not envoi or not data.get("ok"):
             return
         valeur = data.get("value") or {}
+        if envoi.get("action") in ("heal", "poison"):
+            self.potions_utilisees.add(envoi["action"])
+        if envoi.get("action") == "inspect":
+            self.nb_inspections += 1
         if envoi.get("action") == "inspect" and valeur.get("role"):
             label = self.invitations.get(envoi.get("request_id"), {}).get(envoi.get("choice_id"))
             if label:
@@ -529,6 +535,8 @@ class Graphe:
         self.paroles.clear()
         self.accusations.clear()
         self.miroirs.clear()
+        self.potions_utilisees.clear()
+        self.nb_inspections = 0
         for node in self.noeuds.values():
             node.pop("vivant", None)
             node.pop("voix_dernier_conseil", None)
@@ -546,6 +554,11 @@ class Graphe:
         """Noms des loups certains, hors soi : pour un loup, ses partenaires."""
         return sorted(self.noeuds[j]["label"] for j, r in self.certain.items()
                       if r == "role:loup" and j != self.moi and j in self.noeuds)
+
+    def capitaine(self):
+        """Nom du Capitaine connu, ou None."""
+        return next((n["label"] for n in self.noeuds.values()
+                     if n["type"] == "Joueur" and n.get("capitaine")), None)
 
     def pretentions(self, joueur_id):
         """Rôles que ce joueur a dit avoir : {"voyante", ...}."""
