@@ -43,7 +43,9 @@ POIDS = {
     "cite_par_indice": 0.9,         # l'Indice nomme trois vivants dont au moins un loup
     "a_accuse_un_loup": -0.6,       # révélé ensuite comme loup
     "a_accuse_un_innocent": 0.3,    # révélé ensuite comme villageois
+    "accusation_en_miroir": 0.5,    # V6 : même cible, mêmes mots qu'un autre, dans la minute
 }
+SEUIL_MIROIR = 0.5   # part de mots communs (Jaccard) au-delà de laquelle deux accusations se copient
 
 ROLES_ALIAS = {
     "loup": "loup", "loups": "loup", "wolf": "loup", "werewolf": "loup", "loup-garou": "loup",
@@ -110,6 +112,8 @@ class Graphe:
         self.archives = []          # arêtes des manches précédentes
         self.moi = None
         self.manche = None
+        self._minute = self._minute_t = self._cycle_ms = None
+        self.extrapoler = False     # vrai en direct : l'heure avance entre deux messages du serveur
         self.jour = self.minute = None
         self.refs = {}              # ref de perception → id de nœud
         self.visibles = {}          # ref → dernière observation
@@ -121,6 +125,8 @@ class Graphe:
         self.indices = {}           # joueur id → preuves de soupçon
         self.certain = {}           # joueur id → rôle certain
         self.paroles = []           # dernières paroles, relues quand un nouveau joueur apparaît
+        self.accusations = []       # (orateur, cible, mots, t), pour repérer les miroirs (V6)
+        self.miroirs = set()        # paires d'orateurs déjà signalées
 
     # ------------------------------------------------------------------ construction
 
@@ -216,6 +222,18 @@ class Graphe:
 
     # ------------------------------------------------------------------ horloge
 
+    @property
+    def minute(self):
+        """Minute du village. En direct, elle avance seule entre deux messages (`cycle_ms`)."""
+        if self._minute is None or not (self.extrapoler and self._cycle_ms):
+            return self._minute
+        ecoule_ms = (time.time() - self._minute_t) * 1000
+        return int(self._minute + ecoule_ms * 1440 / self._cycle_ms) % 1440
+
+    @minute.setter
+    def minute(self, valeur):
+        self._minute, self._minute_t = valeur, time.time()
+
     def nuit(self):
         return self.minute is not None and (self.minute >= 1320 or self.minute < 480)
 
@@ -225,7 +243,9 @@ class Graphe:
     def _horloge(self, clock):
         if isinstance(clock, dict):
             self.jour = clock.get("day", self.jour)
-            self.minute = clock.get("minute", self.minute)
+            if clock.get("minute") is not None:
+                self.minute = clock["minute"]
+            self._cycle_ms = clock.get("cycle_ms", self._cycle_ms)
 
     # ------------------------------------------------------------------ lecture du journal
 
@@ -394,6 +414,23 @@ class Graphe:
                 self.arete(sid, "ACCUSE", node["id"], rec, "parole",
                            increment=lambda k: 1 - math.exp(-k / 2), texte=brut[:240])
                 self.soupcon(node["id"], "accuse_par_autrui", rec, par=sid)
+                self._miroir(sid, node, texte, rec)
+
+    def _miroir(self, sid, cible, texte, rec):
+        """V6 : deux joueurs accusent la même cible avec les mêmes mots, à moins d'une minute."""
+        mots = set(re.findall(r"[a-z]{4,}", texte)) - set(
+            re.findall(r"[a-z]+", _sans_accents(cible["label"])))
+        t = rec.get("t") or 0
+        for autre, cible_id, mots_autre, t_autre in self.accusations:
+            if autre == sid or cible_id != cible["id"] or abs(t - t_autre) > 60:
+                continue
+            if mots and mots_autre and len(mots & mots_autre) / len(mots | mots_autre) >= SEUIL_MIROIR:
+                paire = tuple(sorted((autre, sid)))
+                if paire not in self.miroirs:
+                    self.miroirs.add(paire)
+                    self.soupcon(sid, "accusation_en_miroir", rec, avec=autre, cible=cible["id"])
+                    self.soupcon(autre, "accusation_en_miroir", rec, avec=sid, cible=cible["id"])
+        self.accusations = (self.accusations + [(sid, cible["id"], mots, t)])[-30:]
 
     def _in_decision_request(self, data, rec):
         choix = {}
@@ -490,10 +527,47 @@ class Graphe:
         self.certain.clear()
         self.cadavres.clear()
         self.paroles.clear()
+        self.accusations.clear()
+        self.miroirs.clear()
         for node in self.noeuds.values():
             node.pop("vivant", None)
             node.pop("voix_dernier_conseil", None)
         self.manche = round_id
+
+    # ------------------------------------------------------------------ lecture par le moteur
+
+    def id_joueur(self, nom):
+        return "joueur:" + nom
+
+    def vivant(self, joueur_id):
+        return self.noeuds.get(joueur_id, {}).get("vivant") is not False
+
+    def loups_connus(self):
+        """Noms des loups certains, hors soi : pour un loup, ses partenaires."""
+        return sorted(self.noeuds[j]["label"] for j, r in self.certain.items()
+                      if r == "role:loup" and j != self.moi and j in self.noeuds)
+
+    def pretentions(self, joueur_id):
+        """Rôles que ce joueur a dit avoir : {"voyante", ...}."""
+        return {dst.split(":", 1)[1] for (src, rel, dst) in self.aretes
+                if src == joueur_id and rel == "PRETEND_ETRE"}
+
+    def nb_accusations(self, joueur_id):
+        """Accusations entendues contre ce joueur, hors les nôtres."""
+        return sum(e["count"] for (src, rel, dst), e in self.aretes.items()
+                   if rel == "ACCUSE" and dst == joueur_id and src != self.moi)
+
+    def accuse_recemment(self, src, dst, depuis_t):
+        edge = self.aretes.get((src, "ACCUSE", dst))
+        return bool(edge and (edge.get("last_t") or 0) >= depuis_t)
+
+    def inspections(self):
+        """Rôles appris par nos inspections de Voyante : {nom: rôle}."""
+        out = {}
+        for (src, rel, dst), edge in self.aretes.items():
+            if rel == "A_LE_ROLE" and any(p.get("regle") == "inspection" for p in edge["preuves"]):
+                out[self.noeuds[src]["label"]] = dst.split(":", 1)[1]
+        return out
 
     # ------------------------------------------------------------------ export
 

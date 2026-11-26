@@ -1,0 +1,152 @@
+{
+ "notes": [
+  {
+   "t": "10:43",
+   "txt": "Prune Request a voté pour le capitaine après que Maître du jeu a dit que c'était illégale"
+  },
+  {
+   "t": "10:43",
+   "txt": "[10:43] Prune Request a voté pour le capitaine après que Maître du jeu a dit que c'était illégale"
+  },
+  {
+   "t": "10:43",
+   "txt": "Plusieurs échecs de suite : changer de plan (explorer, ou aller ailleurs)."
+  },
+  {
+   "t": "10:43",
+   "txt": "[10:43] Prune Request a voté pour le capitaine après que Maître du jeu a dit que c'était illégale"
+  },
+  {
+   "t": "10:43",
+   "txt": "[10:43] Prune Request a voté pour le capitaine après que Maître du jeu a dit que c'était illégale, et j'ai demandé à Prune Request pourquoi il a fait cela. Je dois observer sa réaction."
+  },
+  {
+   "t": "10:43",
+   "txt": "[10:43] Prune Request a voté pour le capitaine après que Maître du jeu a dit que c'était illégale"
+  },
+  {
+   "t": "10:43",
+   "txt": "Prune Request a voté pour le capitaine malgré qu'il ait été déclaré illégal"
+  },
+  {
+   "t": "10:43",
+   "txt": "[10:43] Prune Request a voté pour le capitaine malgré qu'il ait été déclaré illégal"
+  },
+  {
+   "t": "10:43",
+   "txt": "Plusieurs échecs de suite : changer de plan (explorer, ou aller ailleurs)."
+  },
+  {
+   "t": "10:43",
+   "txt": "Prune Request a voté pour le capitaine après que Maître du jeu a dit que c'était illégale"
+  },
+  {
+   "t": "10:43",
+   "txt": "Prune Request a voté illégalement pour le capitaine"
+  },
+  {
+   "t": "10:43",
+   "txt": "Plusieurs échecs de suite : changer de plan (explorer, ou aller ailleurs)."
+  },
+  {
+   "t": "10:43",
+   "txt": "[10:43] Prune Request a voté illégalement pour le capitaine"
+  },
+  {
+   "t": "10:43",
+   "txt": "Prune Request a voté illégalement pour le capitaine"
+  },
+  {
+   "t": "10:43",
+   "txt": "Plusieurs échecs de suite : changer de plan (explorer, ou aller ailleurs)."
+  },
+  {
+   "t": "10:43",
+   "txt": "Prune Request a voté illégalement pour le capitaine"
+  },
+  {
+   "t": "10:43",
+   "txt": "Plusieurs échecs de suite : changer de plan (explorer, ou aller ailleurs)."
+  },
+  {
+   "t": "10:43",
+   "txt": "Prune Request a voté illégalement pour le capitaine"
+  },
+  {
+   "t": "10:43",
+   "txt": "Prune Request est probablement un loup."
+  },
+  {
+   "t": "10:43",
+   "txt": "Prune Request a voté illégalement pour le capitaine"
+  },
+  {
+   "t": "10:43",
+   "txt": "[10:43] Prune Request est probablement un loup."
+  },
+  {
+   "t": "10:43",
+   "txt": "Prune Request est probablement un loup"
+  },
+  {
+   "t": "10:43",
+   "txt": "Prune Request a voté illégalement pour le capitaine"
+  },
+  {
+   "t": "10:43",
+   "txt": "Plusieurs échecs de suite : changer de plan (explorer, ou aller ailleurs)."
+  }
+ ],
+ "people": {
+  "Prune Request": {
+   "t": "10:43",
+   "near": "bench1",
+   "kind": "person"
+  },
+  "Team S-bull": {
+   "t": "10:43",
+   "near": "bench3",
+   "kind": "person"
+  },
+  "Personne": {
+   "t": "10:43",
+   "near": "campfire",
+   "kind": "person"
+  },
+  "Syntax Terror": {
+   "t": "10:43",
+   "near": "canteen",
+   "kind": "person"
+  },
+  "C'est illégale": {
+   "t": "10:43",
+   "near": "bench-chapel-2",
+   "kind": "person"
+  },
+  "Dat'Accessibles": {
+   "t": "10:43",
+   "near": "h2",
+   "kind": "person"
+  },
+  "TEAM Othé Chalamet": {
+   "t": "10:43",
+   "near": "bench-chapel-2",
+   "kind": "person"
+  },
+  "Claire": {
+   "t": "10:43",
+   "near": "h5",
+   "kind": "person"
+  },
+  "IA pas le temps": {
+   "t": "10:43",
+   "near": "h11",
+   "kind": "person"
+  },
+  "Endurance Fondament'AI": {
+   "t": "10:43",
+   "near": null,
+   "kind": "person"
+  }
+ }
+}
