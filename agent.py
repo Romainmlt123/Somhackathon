@@ -61,6 +61,8 @@ class Explorer:
         journal.subscribe(self.graphe.observe)
         self.moteur = moteur.Moteur(self.graphe, secrets=(os.environ.get("TEAM_TOKEN"),))
         self.last_dump = 0.0
+        self.graphe.extrapoler = True   # l'heure du village avance entre deux messages
+        self.dernier_retour = 0.0       # dernière demande de return_home
 
     # ------------------------------------------------------------------ lecture de l'état
 
@@ -197,6 +199,12 @@ class Explorer:
         elif kind == "game_event":
             print(data.get("text", data["kind"]), flush=True)
             self.moteur.evenement(data)
+            if data["kind"] == "scheduled_step":
+                # Secours si l'horloge dérive : ces étapes tombent à 22 h et 8 h.
+                if data.get("step") == "nightfall" and not moteur.nuit(self.minute()):
+                    self.graphe.minute = moteur.NUIT
+                elif data.get("step") == "village_wakes" and moteur.nuit(self.minute()):
+                    self.graphe.minute = moteur.REVEIL
             if data["kind"] == "round_started":
                 self.round_id = data.get("round_id")
             elif data["kind"] == "scheduled_step" and data.get("step") == "village_wakes":
@@ -287,6 +295,9 @@ class Explorer:
             cid = await send("act", {"action": action, "request_id": rid, **champs})
             self.request_commands[cid] = rid
             self.answered.add(rid)
+        except Exception:
+            self.answered.add(rid)   # sinon chaque message relancerait le même échec
+            raise
         finally:
             self.in_progress.discard(rid)
 
@@ -351,7 +362,7 @@ class Explorer:
         return "vote", {"choice_id": choice_id}
 
     async def repondre_epreuve(self, req, action):
-        """V10, C7, L12 : calcul local d'abord, modèle ensuite, réponse de repli enfin."""
+        """V10, C7 : calcul local d'abord, modèle ensuite, réponse de repli enfin."""
         if not action:
             return None
         prompt, role = req.get("prompt") or "", self.role()
@@ -373,8 +384,6 @@ class Explorer:
             c = moteur.choisir_vote(self.graphe, self.nom(), "villageois", action["choices"])
             champs, source = {"choice_id": c.choice_id or action["choices"][0]["choice_id"]}, "repli"
         regle = "V10"
-        if champs and moteur.role_de(role) == "loup" and moteur.LOUP_SABOTE_EPREUVES:
-            champs, regle = epreuves.fausse_reponse(action, champs), "L12"
         if champs and "text" in champs and moteur.nettoyer(champs["text"], self.moteur.secrets) is None:
             champs, regle = None, "C7"
         journal.why("epreuve", regle=regle, source=source, reponse=champs, request_id=req["request_id"])
@@ -473,7 +482,9 @@ class Explorer:
 
     def peut_rentrer(self):
         pret = self.personal.get("powers", {}).get("home_return_ready_ms")
-        return not self.return_command and (pret is None or time.time() * 1000 >= pret)
+        if self.return_command or time.time() - self.dernier_retour < 5:
+            return False   # un refus (immobilized...) ne doit pas déclencher une rafale
+        return pret is None or time.time() * 1000 >= pret
 
     def staying(self):
         return self.resting or self.waiting()
@@ -489,6 +500,7 @@ class Explorer:
         self.resting = True
         if "home" not in self.zones() and not self.waiting() and self.peut_rentrer():
             journal.why("return_home", regle=regle, zones=self.zones())
+            self.dernier_retour = time.time()
             self.return_command = await send("act", {"action": "return_home"})
         await self.lie_down(send)
 

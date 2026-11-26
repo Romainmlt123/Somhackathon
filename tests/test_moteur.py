@@ -293,6 +293,123 @@ def test_agent_villageois_rentre_la_nuit():
     assert ("act", {"action": "return_home"}) in envoyes                               # V1
 
 
+# ---------------------------------------------------------------------- correctifs de la revue
+
+FACTURE_ALIGNEE = """--- DÉBUT DU DOCUMENT ---
+Total à payer : 1 €  (leurre avant le tableau)
+Article    Qté    Prix
+Fers       4      30 €
+Clous      100    12 €
+Total à payer : 42,00 €
+Erratum : Total à payer corrigé : 7 €
+--- FIN DU DOCUMENT ---"""
+
+
+def test_facture_tableau_aligne_et_abstention_sans_tableau():
+    assert epreuves.facture(FACTURE_ALIGNEE) == "42,00 €"
+    sans_tableau = """--- DÉBUT DU DOCUMENT ---
+Total à payer : 1 €
+--- FIN DU DOCUMENT ---"""
+    assert epreuves.facture(sans_tableau) is None   # on ne devine pas : le modèle prend la main
+
+
+def test_apostrophe_typographique_et_nom_pierre():
+    assert moteur.nettoyer("J’ai tué Basile", role="werewolf") is None            # L4
+    assert moteur.nettoyer("Pierre était au feu", role="werewolf") == "Pierre était au feu"
+
+
+def test_horloge_avance_seule_en_direct():
+    g = Graphe()
+    g.extrapoler = True
+    g.observe(rec("snapshot", {"status": "alive", "clock": {"day": 1, "minute": 600, "cycle_ms": 600000},
+                               "self": {"name": "Anne"}, "visible": [], "requests": []}))
+    g._minute_t -= 25   # 25 s plus tard = 1 h de village (25 s par heure)
+    assert 655 <= g.minute <= 665
+    g.extrapoler = False
+    assert g.minute == 600   # rejouer un journal ne dépend pas de l'heure réelle
+
+
+def _agent_et_envois():
+    import agent
+
+    envoyes = []
+
+    async def send(kind, data, command_id=None):
+        envoyes.append((kind, data))
+        return f"c{len(envoyes)}"
+
+    return agent.Explorer(), envoyes, send
+
+
+def _snap(role, minute, zones=(), form="human", visible=(), posture="standing"):
+    return {"type": "snapshot", "seq": 1, "time_ms": 0, "data": {
+        "status": "alive", "round": {"round_id": "r9", "mode": "trial", "day": 1},
+        "clock": {"day": 1, "minute": minute},
+        "self": {"name": "Anne", "role": role, "form": form, "home": "Maison nº 5", "zones": list(zones),
+                 "posture": posture, "gait": "stop", "powers": {}},
+        "visible": list(visible), "scan": None, "requests": []}}
+
+
+def _donner(e, send, *frames):
+    async def go():
+        for f in frames:
+            journal.perceive(f)
+            await e.decide(f, send)
+        await asyncio.sleep(0.05)
+
+    asyncio.run(go())
+
+
+def test_pas_de_rafale_de_return_home_apres_un_refus():
+    e, envoyes, send = _agent_et_envois()
+    vision = {"type": "vision", "seq": 2, "time_ms": 0, "data": {"entered": [], "updated": [], "left": []}}
+    refus = {"type": "command_result", "seq": 3, "time_ms": 0,
+             "data": {"command_id": "c1", "ok": False, "code": "immobilized"}}
+    _donner(e, send, _snap("villager", 22 * 60 + 5), refus, vision, vision, vision)
+    assert [d for k, d in envoyes if d.get("action") == "return_home"] == [{"action": "return_home"}]
+
+
+def test_une_decision_qui_plante_n_est_pas_relancee():
+    e, envoyes, send = _agent_et_envois()
+    appels = []
+
+    async def plante(req):
+        appels.append(1)
+        raise RuntimeError("invitation bizarre")
+
+    e.reponse = plante
+    demande = {"type": "decision_request", "seq": 2, "time_ms": 0, "data": {
+        "request_id": "q1", "kind": "council_vote", "deadline_ms": time.time() * 1000 + 5000,
+        "allow_abstain": False, "actions": []}}
+    scan = {"type": "scan", "seq": 3, "time_ms": 0, "data": {"from_deg": -60, "step_deg": 3, "range_m": 20,
+                                                              "distances_m": [None] * 5, "kinds": [None] * 5}}
+    _donner(e, send, _snap("villager", 19 * 60 + 30, zones=["council"]), demande, scan, scan, scan)
+    assert len(appels) == 1
+
+
+def test_loup_se_transforme_chasse_puis_rentre():
+    e, envoyes, send = _agent_et_envois()
+    pierre = {"ref": "s1", "kind": "stone", "bearing_deg": 0, "distance_m": 1.5}
+    proie = {"ref": "p1", "kind": "person", "name": "Basile", "engaged": True, "bearing_deg": 0, "distance_m": 1.5}
+
+    def self_msg(form):
+        s = _snap("werewolf", 23 * 60, form=form)["data"]["self"]
+        return {"type": "self", "seq": 5, "time_ms": 0, "data": s}
+
+    def vision(*obs):
+        return {"type": "vision", "seq": 4, "time_ms": 0, "data": {"entered": list(obs), "updated": [], "left": []}}
+
+    def ok(cid):
+        return {"type": "command_result", "seq": 6, "time_ms": 0, "data": {"command_id": cid, "ok": True}}
+
+    _donner(e, send, _snap("werewolf", 23 * 60, visible=[pierre]))
+    assert ("act", {"action": "transform", "target_ref": "s1"}) in envoyes            # L1
+    _donner(e, send, ok(e.action_command or "c1"), self_msg("wolf"), vision(proie))
+    assert ("act", {"action": "attack", "target_ref": "p1", "round_id": "r9"}) in envoyes
+    _donner(e, send, ok(e.action_command or "c2"), self_msg("human"))
+    assert e.moteur.chasse_finie                                                      # L3
+
+
 if __name__ == "__main__":
     for nom, fn in list(globals().items()):
         if nom.startswith("test_"):

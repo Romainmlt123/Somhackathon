@@ -44,7 +44,8 @@ def facture(prompt):
         return None
     doc = prompt[debut.end():fin.start() if fin and fin.start() > debut.end() else len(prompt)]
     lignes = [l for l in doc.splitlines()]
-    tableau = [i for i, l in enumerate(lignes) if l.count("|") >= 2 or l.count("\t") >= 2]
+    colonnes = re.compile(r"\S( {2,}|\t)\S")   # « | a | b | », tabulations ou colonnes alignées
+    tableau = [i for i, l in enumerate(lignes) if l.count("|") >= 2 or colonnes.search(l)]
     candidates = [i for i, l in enumerate(lignes) if TOTAL.search(l)]
     if not candidates:
         return None
@@ -58,9 +59,11 @@ def facture(prompt):
             else:
                 break
         apres = [i for i in candidates if i > fin_tableau]
-        ligne = lignes[apres[0]] if apres else lignes[candidates[0]]
+        if not apres:
+            return None
+        ligne = lignes[apres[0]]
     else:
-        ligne = lignes[candidates[0]]
+        return None   # tableau introuvable : le « Total » peut être un leurre, on s'abstient
     reste = ligne[TOTAL.search(ligne).end():]
     m = MONTANT.search(reste)
     if not m:
@@ -203,20 +206,4 @@ def resoudre(prompt, action):
                 valeur = None
             if valeur:
                 return {"text": valeur, "solveur": solveur.__name__}
-    return None
-
-
-def fausse_reponse(action, juste=None):
-    """L12 (désactivée par défaut) : une réponse fausse mais plausible."""
-    fmt, choix = action.get("format"), action.get("choices") or []
-    if fmt == "choice" and choix:
-        autres = [c["choice_id"] for c in choix if c["choice_id"] != (juste or {}).get("choice_id")]
-        return {"choice_id": (autres or [choix[0]["choice_id"]])[0]}
-    if fmt == "multi_choice" and choix:
-        return {"choice_ids": [choix[0]["choice_id"]]}
-    if fmt == "text":
-        valeur = (juste or {}).get("text") or "0"
-        if valeur and valeur[-1].isdigit():
-            return {"text": valeur[:-1] + str((int(valeur[-1]) + 3) % 10)}
-        return {"text": valeur[::-1]}
     return None

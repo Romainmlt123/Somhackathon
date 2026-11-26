@@ -89,7 +89,8 @@ Les règles C1-C9 (communes), V1-V12 (village) et L1-L13 (loup) de l'étude sont
 - **Quoi dire** : `Moteur.entendre` (réponses), `Moteur.au_conseil` (faits observés), toujours filtré par `nettoyer` (240 caractères, aucun secret, mots interdits du loup).
 - **Le modèle** n'est appelé que pour départager un vote incertain, reformuler une réponse quand on est interpellé, et les épreuves que `epreuves.py` ne reconnaît pas. Sans `--model`, l'agent joue entièrement en local.
 - **Limite connue** : le corps de `agent.py` ne sait se diriger que vers un repère visible ; sinon il explore au hasard. Le corps de la branche `romain` (`village/body.py`, navigation sur carte) pourrait exécuter les mêmes objectifs.
-- **Désactivée par défaut** : `LOUP_SABOTE_EPREUVES` (L12), tant qu'on ne sait pas si les réponses individuelles sont visibles.
+- **Pas implémentées** : L2 (rester loin des autres la nuit), L12 (réponse fausse du loup aux épreuves, tant qu'on ne sait pas si les réponses sont visibles) et L13 (estimer les rôles chaque matin). V3 et V12 ne sont que des poids du graphe.
+- **Horloge** : `graphe.minute` avance seule entre deux messages (`cycle_ms`) et se recale sur `nightfall` / `village_wakes`.
 
 ## Conventions
 

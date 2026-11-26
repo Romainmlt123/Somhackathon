@@ -9,6 +9,7 @@ reformuler une réponse quand on est interpellé, et les épreuves que `epreuves
 sait pas calculer.
 """
 
+import random
 import re
 import time
 import unicodedata
@@ -32,10 +33,6 @@ SEUIL_PREUVE = 0.75
 # V9 : la Sorcière n'empoisonne qu'au-dessus.
 SEUIL_POISON = 0.8
 
-# L12 : le loup répond faux aux épreuves IA. Désactivé tant qu'on ne sait pas si les
-# réponses individuelles sont visibles des autres (ETUDE_LOUP_GAROU.md, section 7).
-LOUP_SABOTE_EPREUVES = False
-
 # C9 : une personnalité constante, reprise dans tous les prompts.
 PERSONNALITE = (
     "Tu es un ancien du village, calme, précis et un peu pince-sans-rire. Tu parles par "
@@ -44,7 +41,7 @@ PERSONNALITE = (
 
 # L4 : ce qu'un loup ne dit jamais, parce qu'un villageois ne peut pas le savoir.
 MOTS_INTERDITS_LOUP = (
-    "pierre", "clairiere", "transform", "meute", "chasse", "j'ai tue", "on a tue",
+    "la pierre", "clairiere", "transform", "meute", "chasse", "j'ai tue", "on a tue",
     "nous avons tue", "mon partenaire", "ma partenaire", "nous les loups", "notre victime",
 )
 
@@ -69,7 +66,7 @@ LIEUX_DITS = {
 
 def normaliser(texte):
     return "".join(
-        c for c in unicodedata.normalize("NFD", str(texte or ""))
+        c for c in unicodedata.normalize("NFD", str(texte or "").replace("’", "'"))
         if unicodedata.category(c) != "Mn"
     ).lower()
 
@@ -167,8 +164,8 @@ def choisir_vote(graphe, moi, role, choix, kind="council_vote"):
     fiches = [f for f in _fiches(graphe, choix) if f["label"] != moi]   # C2
     if not fiches:
         return Choix(None, "C2", "aucun candidat autre que soi")
-    plus_suspect = lambda f: (-f["p"], -f["accus"], f["label"] or "")
-    plus_fiable = lambda f: (f["p"], f["accus"], f["label"] or "")
+    plus_suspect = lambda f: (-f["p"], -f["accus"], random.random())
+    plus_fiable = lambda f: (f["p"], f["accus"], random.random())
 
     if role_de(role) == "loup":
         partenaires = [f for f in fiches if f["certain"] == "role:loup"]

@@ -112,6 +112,8 @@ class Graphe:
         self.archives = []          # arêtes des manches précédentes
         self.moi = None
         self.manche = None
+        self._minute = self._minute_t = self._cycle_ms = None
+        self.extrapoler = False     # vrai en direct : l'heure avance entre deux messages du serveur
         self.jour = self.minute = None
         self.refs = {}              # ref de perception → id de nœud
         self.visibles = {}          # ref → dernière observation
@@ -220,6 +222,18 @@ class Graphe:
 
     # ------------------------------------------------------------------ horloge
 
+    @property
+    def minute(self):
+        """Minute du village. En direct, elle avance seule entre deux messages (`cycle_ms`)."""
+        if self._minute is None or not (self.extrapoler and self._cycle_ms):
+            return self._minute
+        ecoule_ms = (time.time() - self._minute_t) * 1000
+        return int(self._minute + ecoule_ms * 1440 / self._cycle_ms) % 1440
+
+    @minute.setter
+    def minute(self, valeur):
+        self._minute, self._minute_t = valeur, time.time()
+
     def nuit(self):
         return self.minute is not None and (self.minute >= 1320 or self.minute < 480)
 
@@ -229,7 +243,9 @@ class Graphe:
     def _horloge(self, clock):
         if isinstance(clock, dict):
             self.jour = clock.get("day", self.jour)
-            self.minute = clock.get("minute", self.minute)
+            if clock.get("minute") is not None:
+                self.minute = clock["minute"]
+            self._cycle_ms = clock.get("cycle_ms", self._cycle_ms)
 
     # ------------------------------------------------------------------ lecture du journal
 
