@@ -131,6 +131,27 @@ class Brain:
             elif k == "decision_request":
                 self.wake.set()
 
+    @staticmethod
+    def _mots(texte):
+        import unicodedata
+        if "," in texte[:40]:
+            texte = texte.split(",", 1)[1]       # on ignore le prénom d'adresse : « Léa, je… » et « Basile, je… » sont le même gabarit
+        plat = unicodedata.normalize("NFD", texte.casefold())
+        plat = "".join(c if c.isalnum() else " " for c in plat if unicodedata.category(c) != "Mn")
+        return {m for m in plat.split() if len(m) >= 3}
+
+    def redit(self, texte, seuil=0.6):
+        """Vrai si la phrase redit (presque mot pour mot) l'une de nos dernières paroles ou l'une des dernières entendues."""
+        mots = self._mots(texte)
+        if not mots:
+            return False
+        recentes = list(getattr(self, "dit_recent", [])) + [h.split("): ", 1)[-1] for h in list(self.heard)[-8:]]
+        for autre in recentes:
+            m2 = self._mots(autre)
+            if m2 and len(mots & m2) / len(mots | m2) >= seuil:
+                return True
+        return False
+
     def sync_clock(self):
         """L'horloge de l'état (extrapolée) alimente le moteur de règles."""
         if self.st.minute is not None:
@@ -342,15 +363,23 @@ class Brain:
                 say, volume, regle = str(d.get("dire") or "").strip(), d.get("volume"), None
                 parole = self.parole_moteur()
                 if parole:
-                    say, volume, regle = parole.texte, parole.volume, parole.regle
+                    # Une règle qui « a besoin du modèle » (C6 : on nous interpelle) ne fournit qu'un texte de secours :
+                    # la réponse du modèle, qui connaît le contexte, l'emporte quand elle existe.
+                    if not (getattr(parole, "besoin_modele", False) and say):
+                        say, volume, regle = parole.texte, parole.volume, parole.regle
                 # C5, C7, L4 : 240 caractères, jamais le jeton, aucun mot qui trahit un loup.
                 filtre = moteur.nettoyer(say, self.moteur.secrets, self.st.role, self.rules.meute) if say else None
                 if say and filtre is None:
                     journal.why("silence", regle=regle or "L4", brouillon=say[:80])
                 say = filtre or ""
+                if say and self.redit(say):                 # jamais deux fois la même phrase (la nôtre ou celle d'un autre)
+                    journal.why("silence", regle="doublon", brouillon=say[:80])
+                    say = ""
                 if say and time.time() - self.last_say > 2.2 and self.st.posture != "sleeping" and time.time() > self.rules.mute_until:
                     r = await self.b.speak(say, volume if volume in ("whisper", "say", "shout") else "say")
                     self.last_say = time.time()
+                    if r.get("ok"):
+                        self.dit_recent = (list(getattr(self, "dit_recent", [])) + [say])[-8:]
                     if r.get("code") == "muted":
                         self.rules.mute_until = time.time() + 60
                     log.info("DIT (%s) %s -> %s", d.get("volume", "say"), say, r.get("ok") or r.get("code"))

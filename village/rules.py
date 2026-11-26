@@ -41,6 +41,8 @@ class Rules:
         self.wolf_done = False
         self.mute_until = 0.0
         self.attempts = {}
+        self.searched = set()               # maisons déjà fouillées cette nuit
+        self.hot = None                     # maison où l'on a vu du monde : fouillée en premier
         self.meute = set()                  # loups connus (alliés) : on ne les attaque pas
 
     # ------------------------------------------------------------ événements du serveur
@@ -158,6 +160,14 @@ class Rules:
             if "council" in st.zones and st.posture == "standing":
                 await self.b.sit()
             return True
+        if st.role == "wolf" and not self.is_night() and st.posture == "standing" and not st.world.of_kind("stone") \
+                and self.attempts.get("scout", 0) < 8:
+            # Loup : la pierre doit être sur la carte AVANT la nuit (on ne voit qu'à 8-16 m la nuit). On la cherche de jour.
+            self.attempts["scout"] = self.attempts.get("scout", 0) + 1
+            log.info("RÉFLEXE loup : je cherche la pierre de jour (essai %d)", self.attempts["scout"])
+            await self.go_stone_hint()
+            await self.b.explore(until=lambda: bool(st.world.of_kind("stone")), budget=45)
+            return True
         return False
 
     async def go_place(self, place, urgent=False):
@@ -168,6 +178,16 @@ class Rules:
         if place in st.visible or place in st.world.landmarks:
             return await b.goto(place, stop=2.0, timeout=45, gait="run" if urgent else "walk")
         return False
+
+    async def go_stone_hint(self):
+        """La clairière de la pierre s'ouvre entre la chapelle et la cantine (briefing des organisateurs)."""
+        st = self.st
+        chapel, canteen = st.world.nearest("chapel"), st.world.nearest("canteen")
+        if chapel and canteen and self.attempts.get("stone_hint", 0) < 3:
+            self.attempts["stone_hint"] = self.attempts.get("stone_hint", 0) + 1
+            c1, c2 = st.world.xy(chapel), st.world.xy(canteen)
+            await self.b.goto(((c1[0] + c2[0]) / 2, (c1[1] + c2[1]) / 2), stop=3.0, timeout=60)
+            await self.b.scan_around(4)
 
     def veto(self, d):
         """Empêche le modèle de quitter le conseil pendant la convocation. Renvoie un message ou None."""
@@ -412,16 +432,15 @@ class Rules:
             return False
         if self.wolf_done:
             return False
+        if h < WOLF_TO and h > WOLF_TO - 0.4 and st.form != "wolf":      # trop tard pour se transformer et chasser
+            self.wolf_done = True
+            return False
         if st.form != "wolf":
             stone = "stone" if ("stone" in st.visible or "stone" in st.world.landmarks) else None
             if stone is None:
                 stone = st.world.nearest("stone")
             if stone is None:
-                chapel, canteen = st.world.nearest("chapel"), st.world.nearest("canteen")
-                if chapel and canteen and self.attempts.get("stone_hint", 0) < 2:
-                    self.attempts["stone_hint"] = self.attempts.get("stone_hint", 0) + 1
-                    c1, c2 = st.world.xy(chapel), st.world.xy(canteen)
-                    await b.goto(((c1[0] + c2[0]) / 2, (c1[1] + c2[1]) / 2), stop=3.0, timeout=60)   # la clairière s'ouvre entre les deux
+                await self.go_stone_hint()
                 await b.explore(until=lambda: bool(st.world.of_kind("stone")), budget=30)
                 self.attempts["wolf_stone"] = self.attempts.get("wolf_stone", 0) + 1
                 if self.attempts["wolf_stone"] > 4:
@@ -440,6 +459,7 @@ class Rules:
                     if self.attempts["wolf_tf"] > 3:
                         self.wolf_done = True
             else:
+                self.searched.clear()
                 self.br.note("Transformé en loup à la pierre.")
             return True
         victim = await self.find_victim()
@@ -448,13 +468,22 @@ class Rules:
             log.info("LOUP attaque %s -> %s", victim, r.get("ok") or r.get("code"))
             if r.get("ok"):
                 self.br.note("J'ai attaqué un villageois cette nuit.")
-                self.wolf_done = True
+                await st.wait_change(0.4)
+                if st.form != "wolf":                          # tuer dans une maison met fin à la chasse de la nuit
+                    self.wolf_done = True
+                else:                                          # tué dehors : la meute peut encore chasser (deux victimes au plus)
+                    self.attempts["wolf_kills"] = self.attempts.get("wolf_kills", 0) + 1
+                    self.wolf_done = self.attempts["wolf_kills"] >= 2
+                self.searched.clear()
                 return True
             v = st.visible.get(victim)
             if r.get("code") == "action_unavailable" and v and v.get("name"):
                 # le serveur ne refuse une cible engagée et vivante que si elle est de la meute
                 self.meute.add(v["name"])
                 self.br.note(f"{v['name']} est un loup comme moi (attaque refusée).")
+                self.searched.clear()                      # ce n'est pas une chasse ratée : on repart chercher une autre cible
+                self.hot = st.world.nearest("house") if st.world.usable else None      # la maison où il y a du monde : on y revient d'abord
+                return True
         self.attempts["wolf_hunt"] = self.attempts.get("wolf_hunt", 0) + 1
         if self.attempts["wolf_hunt"] > 3:
             self.wolf_done = True
@@ -466,22 +495,43 @@ class Rules:
                 and v.get("name") != me and v.get("name") not in self.meute]
 
     async def find_victim(self):
-        """Cherche un habitant engagé : en vue d'abord, sinon en faisant le tour des maisons connues (la nôtre exclue)."""
+        """Cherche un habitant engagé : en vue (tour d'horizon), sinon fouille des maisons connues une à une, la nôtre exclue."""
         st, b, w = self.st, self.b, self.st.world
-        t = self.targets_in_view()
-        if t:
-            return min(t, key=lambda v: (v.get("posture") != "sleeping", v["distance_m"]))["ref"]
+
+        def best():
+            t = self.targets_in_view()
+            return min(t, key=lambda v: (v.get("posture") != "sleeping", v["distance_m"]))["ref"] if t else None
+        if (v := best()):
+            return v
+        await b.scan_around(4)                      # un regard circulaire : une proie est peut-être là (vue de loup : 16 m)
+        if (v := best()):
+            return v
         own = b.home_ref()
-        houses = sorted((r for r in w.of_kind("house") if r != own and w.door_of(r)), key=lambda r: w.polar_to(r)[1] if w.usable else 0)
+        pending = [r for r in w.of_kind("house") if r != own and w.door_of(r) and r not in self.searched]
+        pending.sort(key=lambda r: (r != self.hot, w.polar_to(r)[1] if w.usable else 0))
+        if not pending:
+            self.searched.clear()                   # tout est fouillé : les gens ont pu bouger, on recommencera
+            await b.explore(budget=10)
+            return best()
         t0 = time.time()
-        for hse in houses[:5]:
+        for hse in pending[:5]:
             if time.time() - t0 > 100:
                 break
-            if not await b.enter(hse):
+            self.searched.add(hse)
+            try:
+                entered = await asyncio.wait_for(b.enter(hse), 35)      # porte introuvable ou passage bouché : on passe
+            except asyncio.TimeoutError:
+                entered = False
+            if not entered:
+                # porte bloquée (quelqu'un est dans l'embrasure) : une proie visible de dehors s'attaque de dehors
+                if (v := best()):
+                    return v
+                await b.scan_around(3)
+                if (v := best()):
+                    return v
                 continue
             await b.scan_around(4)
-            t = self.targets_in_view()
-            if t:
-                return min(t, key=lambda v: (v.get("posture") != "sleeping", v["distance_m"]))["ref"]
+            if (v := best()):
+                return v
             await b.leave(hse)
         return None

@@ -336,10 +336,20 @@ class Body:
         ref = ref or self._nearest_ref("stone")
         return await self._interact("transform", ref) if ref else {"ok": False, "code": "no_stone"}
 
-    async def attack(self, ref, close=1.4):
-        """Loup transformé : se colle à la cible (visible, ≤ 2 m) et attaque."""
+    async def attack(self, ref, close=1.3):
+        """Loup transformé : court vers la cible (visible, ≤ 2 m exigés) et attaque ; la proie bouge, on recolle et on réessaie."""
         rid = (self.st.round or {}).get("round_id")
-        res = await self._interact("attack", ref, reach=REACH - 0.2 if close is None else close + 0.6, round_id=rid)
+        res = {"ok": False, "code": "unseen"}
+        for _ in range(8):
+            v = self.st.visible.get(ref)
+            if v is None:
+                return {"ok": False, "code": "unseen"}
+            if v["distance_m"] > 1.6:
+                await self.goto(ref, stop=close, gait="run", timeout=12)
+            await self.face(ref)
+            res = await self._act("attack", target_ref=ref, round_id=rid)
+            if res.get("ok") or res.get("code") != "out_of_reach":
+                return res
         return res
 
     def _nearest_ref(self, kind):

@@ -88,6 +88,7 @@ class Sim:
         self.log = []
         self.ws = None
         self.round = {"round_id": "r1", "mode": "trial", "day": 1}
+        self.pack = set()           # références de loups de la meute : le serveur refuse de les faire attaquer
         self.requests = {}          # request_id -> demande ouverte
         self.responses = []         # (request_id, action, data) acceptées
         self.refusals = []          # (action, code)
@@ -307,8 +308,8 @@ class Sim:
                 return await self.result(cid, False, "action_unavailable")
             self.form = "wolf"
         elif a == "attack":
-            if self.form != "wolf" or d.get("round_id") != self.round["round_id"] or v["kind"] != "person":
-                return await self.result(cid, False, "action_unavailable")
+            if self.form != "wolf" or d.get("round_id") != self.round["round_id"] or v["kind"] != "person" or ref in self.pack:
+                return await self.refuse(cid, "attack", "action_unavailable")
             self.kills.append(ref)
             self.persons.pop(ref)
             if any(abs(self.x - h.cx) < h.HALF and abs(self.y - h.cy) < h.HALF for h in self.houses):
