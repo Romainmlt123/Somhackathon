@@ -12,6 +12,8 @@ import uuid
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
+import journal
+
 from .state import GameState
 
 
@@ -42,6 +44,7 @@ class Session:
             await asyncio.sleep(0.05)
         try:
             if self.ws is not None:
+                journal.act(kind, cid, data)
                 await self.ws.send(frame)
             return await asyncio.wait_for(asyncio.shield(fut), max(0.1, timeout - (time.time() - t0)))
         except (asyncio.TimeoutError, ConnectionClosed):
@@ -62,8 +65,8 @@ class Session:
             except InvalidStatus as exc:
                 if exc.response.status_code in (401, 409):
                     raise Fatal(f"Connexion refusée ({exc.response.status_code}) : jeton invalide ou autre agent connecté.")
-            except (OSError, ConnectionClosed, asyncio.TimeoutError):
-                pass
+            except (OSError, ConnectionClosed, asyncio.TimeoutError) as exc:
+                journal.session("disconnect", error=repr(exc))
             self.ws = None
             self.state.connected = False
             await asyncio.sleep(1.5)
@@ -74,6 +77,7 @@ class Session:
             await ws.send(json.dumps({"type": "hello", "agent_version": self.version}))
             self.ws = ws
             self.state.connected = True
+            journal.session("connect", agent_version=self.version)
             for frame, fut in list(self.pending.values()):   # rejeu des commandes sans accusé
                 await ws.send(frame)
             for cb in self.on_connect:
@@ -82,6 +86,7 @@ class Session:
                 if self.log:
                     self.log.write(message + "\n")
                 frame = json.loads(message)
+                journal.perceive(frame)
                 if frame["type"] == "command_result":
                     entry = self.pending.get(frame["data"]["command_id"])
                     if entry and not entry[1].done():

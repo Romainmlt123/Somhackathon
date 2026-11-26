@@ -12,6 +12,8 @@ import time
 from collections import deque
 from pathlib import Path
 
+import journal
+
 from .geometry import local_to_world, polar_to_local
 from .llm import parse_json
 from .persona import system_prompt
@@ -99,6 +101,7 @@ class Brain:
         """Consomme la file d'événements du serveur."""
         while True:
             f = await self.s.events.get()
+            journal.handled(f)
             k, d = f["type"], f["data"]
             self.rules.on_event(k, d)
             if k == "sound" and d.get("kind") == "speech":
@@ -297,6 +300,8 @@ class Brain:
                     continue
                 t0 = time.time()
                 ctx, raw, usage, d, err = await self.decide()
+                journal.why(str(d.get("action", "attendre")), cible=d.get("cible"), pensee=d.get("pensee"),
+                            dire=d.get("dire"), erreur=err, heure=hhmm(self.st.minute))
                 say = str(d.get("dire") or "").strip()
                 if say and time.time() - self.last_say > 2.2 and self.st.posture != "sleeping" and time.time() > self.rules.mute_until:
                     r = await self.b.speak(say, d.get("volume") if d.get("volume") in ("whisper", "say", "shout") else "say")
@@ -320,6 +325,8 @@ class Brain:
                     await self.b.explore(budget=8)
                     self.fail_streak = 0
                 self.history.append((f"{d.get('action')} {d.get('cible') or ''}".strip(), result))
+                journal.event("resultat", action=d.get("action"), cible=d.get("cible"), result=result,
+                              cout_total=round(self.llm.cost, 6), appels=self.llm.calls)
                 log.info("[%s] %s | %s %s -> %s", hhmm(self.st.minute), d.get("pensee"), d.get("action"), d.get("cible") or "", result)
                 self.decisions.write(json.dumps({"t": time.time(), "hour": hhmm(self.st.minute), "context": ctx, "raw": raw,
                                                  "decision": d, "result": result, "usage": usage, "error": err,

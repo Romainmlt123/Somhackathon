@@ -13,6 +13,9 @@ from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
 
+import journal
+from graphe import Graphe
+
 from village.body import Body
 from village.brain import Brain
 from village.llm import LLM
@@ -27,6 +30,21 @@ def usage():
     req = Request(os.environ["LLM_GATEWAY_URL"] + "/usage", headers={"Authorization": "Bearer " + os.environ["TEAM_TOKEN"]})
     with urlopen(req, timeout=8) as r:
         return json.load(r)
+
+
+async def observabilite(st):
+    """Écrit régulièrement l'état de l'agent dans le journal, et le graphe à côté du journal."""
+    graphe = Graphe()
+    journal.subscribe(graphe.observe)
+    while True:
+        await asyncio.sleep(15)
+        journal.state(name=st.me.get("name"), role=st.role, posture=st.posture, zones=st.zones,
+                      alive=st.alive, connected=st.connected, open_requests=sorted(st.requests))
+        if journal.ENABLED:
+            try:
+                graphe.ecrire_json(journal.path().with_suffix(".graphe.json"))
+            except OSError:
+                pass
 
 
 async def main():
@@ -52,7 +70,9 @@ async def main():
             await asyncio.sleep(5)
             st.world.advance()
             st.world.save(force=st.world.fixed)
-    tasks = [asyncio.create_task(c) for c in (s.run(), brain.run(), saver())]
+    journal.session("start", agent_version="brain-1", model=llm.model, trace=str(journal.path()))
+    print("Journal :", journal.path(), flush=True)
+    tasks = [asyncio.create_task(c) for c in (s.run(), brain.run(), saver(), observabilite(st))]
     try:
         done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for t in done:
