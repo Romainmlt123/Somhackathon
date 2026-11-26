@@ -252,3 +252,91 @@
 
     C’est pas faux !
 
+
+
+    Moi je dis, un village qui vote à l’unanimité pour la fourche, c’est un village qui a une grosse envie de soupe.
+
+
+
+    Je suis pas contre les accusations, hein. Je suis contre les accusations sans tarte aux pommes.
+
+
+
+    On m’a dit que le loup était parmi nous. Moi, ce qui me fait peur, c’est que ça soit celui qui a le meilleur pain.
+
+
+
+    Si je dors pas la nuit, c’est pas à cause des loups. C’est à cause de mon voisin qui ronfle en trois voix.
+
+
+
+    Voter à main levée, c’est bien. Mais voter à main levée en regardant ses pieds, c’est un aveu.
+
+
+
+    Y a des gens ici qui disent « je sais pas » avec beaucoup trop d’assurance. Moi ça me met la puce à l’oreille.
+
+
+
+    Le conseil, c’est comme une soupe : plus on remue, plus ça sent le poireau.
+
+
+
+    Un loup qui joue les agneaux, c’est pas un mouton. C’est un type qui s’est acheté un pull.
+
+
+
+    J’ai pas d’preuve, j’ai pas d’témoin, mais j’ai un très, très bon pressentiment. Et c’est mon pressentiment qui vote.
+
+
+
+    On a déjà éliminé trois innocents. À ce rythme-là, d’ici jeudi, il restera plus que le coupable et le chat.
+
+
+
+    Faut qu’on soit méthodiques. D’abord on s’accuse, ensuite on se fâche, et à la fin on vote au hasard. C’est la tradition.
+
+
+
+    Je veux bien admettre que je suis suspect. Mais alors, suspect de quoi ? Parce que « de tout », c’est pas une réponse.
+
+
+
+    Moi, quand je vois quelqu’un qui sourit trop pendant un vote, je vérifie s’il a pas des crocs. Ou des dettes.
+
+
+
+    Ça fait trois fois que je vous demande où vous étiez à minuit, et trois fois vous me parlez de votre cousin. Ça commence à faire beaucoup de cousin.
+
+
+
+    Vous voulez un conseil ? Mangez de l’ail, dormez les fenêtres fermées et fiez-vous jamais à quelqu’un qui dit « fiez-vous à moi ».
+
+
+
+    La voyante a dit que c’était quelqu’un de bien caché. Eh ben on a le même problème que les chaussettes : on les trouve jamais quand il faut.
+
+
+
+    Je propose qu’on vote tous pour la même personne. Comme ça, si on se trompe, on se trompe ensemble, et c’est plus convivial.
+
+
+
+    Une chose est sûre : celui qui a dit « on est tous innocents ici » a dit ça un peu vite. Je dis ça, je dis rien.
+
+
+
+    Quand j’étais petit, on m’a dit que les loups-garous, ça existait pas. Depuis, je fais confiance à plus personne, surtout aux adultes.
+
+
+
+    Si le feu de camp pouvait parler, il dirait sûrement : « Arrêtez de me demander qui a menti, je suis un feu. »
+
+
+
+    On dit que la nuit porte conseil. Moi, la nuit, elle porte surtout des gens qui se promènent là où ils devraient pas.
+
+
+
+    Moi je suis pour le débat, mais un débat court. Parce que dans un long débat, y en a toujours un qui sort ses théories.
+
