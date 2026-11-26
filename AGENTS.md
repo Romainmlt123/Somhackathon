@@ -11,7 +11,11 @@ Ce dépôt contient l'agent Python de l'équipe pour le jeu du village (Loup-Gar
 | Règles du jeu (71 cartes, aide-mémoire chiffré en fin de fichier) | [Régles/LIVRET.md](Régles/LIVRET.md) |
 | Plan du village décrit pour un LLM | [Régles/carte_village_llm.md](Régles/carte_village_llm.md) |
 | Connexion, file des messages reçus, envoi des commandes | [client.py](client.py) |
-| Stratégie : `Explorer.decide` | [agent.py](agent.py) |
+| Règles de conduite de l'habitant, et leur justification | [Régles/ETUDE_LOUP_GAROU.md](Régles/ETUDE_LOUP_GAROU.md) |
+| Moteur de règles : où aller, qui viser, quoi dire (sans réseau) | [moteur.py](moteur.py) |
+| Épreuves IA calculées sur le poste | [epreuves.py](epreuves.py) |
+| Corps de l'agent, qui exécute le moteur : `Explorer.decide` | [agent.py](agent.py) |
+| Tests (`.venv/Scripts/python -m pytest tests`) | [tests/test_moteur.py](tests/test_moteur.py) |
 | Appel au modèle via la passerelle de l'équipe | [appel_modele.py](appel_modele.py) |
 | Journal d'observabilité | [journal.py](journal.py) |
 | Graphe de connaissances (joueurs, lieux, rôles, soupçons) | [graphe.py](graphe.py) |
@@ -75,6 +79,17 @@ Variables d'environnement : `TRACE=0` (pas de fichier), `TRACE_DIR`, `TRACE_SCAN
 - **Pas de position absolue** dans le protocole : une personne est rattachée au repère visible le plus proche au même instant.
 - **D'une manche à l'autre**, rôles, soupçons et morts sont archivés ; `HABITE` et `VU_PRES_DE` sont conservés.
 - **À vérifier sur une vraie manche** : le format exact de `vote_closed` et `dawn` est deviné dans `_vote_clos` et `_aube`.
+
+## Moteur de règles
+
+Les règles C1-C9 (communes), V1-V12 (village) et L1-L13 (loup) de l'étude sont appliquées sans modèle par `moteur.py`. Chaque décision est journalisée avec son numéro : `jq 'select(.ev=="why") | [.decision, .regle, .motif]'`.
+
+- **Où aller** : `moteur.objectif()` (nuit à la maison, épreuve, conseil, pierre et chasse pour le loup).
+- **Qui viser** : `choisir_vote`, `choisir_inspection`, `choisir_potion`, `choisir_successeur`, à partir des soupçons du graphe.
+- **Quoi dire** : `Moteur.entendre` (réponses), `Moteur.au_conseil` (faits observés), toujours filtré par `nettoyer` (240 caractères, aucun secret, mots interdits du loup).
+- **Le modèle** n'est appelé que pour départager un vote incertain, reformuler une réponse quand on est interpellé, et les épreuves que `epreuves.py` ne reconnaît pas. Sans `--model`, l'agent joue entièrement en local.
+- **Limite connue** : le corps de `agent.py` ne sait se diriger que vers un repère visible ; sinon il explore au hasard. Le corps de la branche `romain` (`village/body.py`, navigation sur carte) pourrait exécuter les mêmes objectifs.
+- **Désactivée par défaut** : `LOUP_SABOTE_EPREUVES` (L12), tant qu'on ne sait pas si les réponses individuelles sont visibles.
 
 ## Conventions
 
