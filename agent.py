@@ -8,7 +8,9 @@ import os
 import random
 from pathlib import Path
 
+import journal
 from client import Agent
+from graphe import Graphe
 from dotenv import load_dotenv
 from websockets.exceptions import ConnectionClosed, InvalidStatus
 
@@ -26,8 +28,37 @@ class Explorer:
         self.beds = {}
         self.resting = self.asked_tonight = False
         self.return_command = self.sleep_command = self.stand_command = None
+        # Observabilité : graphe de connaissances nourri par le journal, état écrit régulièrement.
+        self.graphe = Graphe()
+        journal.subscribe(self.graphe.observe)
+        self.last_dump = 0.0
 
     async def decide(self, frame, send):
+        await self._decide(frame, send)
+        if time.time() - self.last_dump >= 15:
+            self.dump()
+
+    def dump(self):
+        """Écrit la mémoire interne dans le journal et le graphe à côté du journal."""
+        self.last_dump = time.time()
+        journal.state(
+            name=self.personal.get("name"),
+            posture=self.personal.get("posture"),
+            zones=self.personal.get("zones"),
+            resting=self.resting,
+            beds_known=self.beds,
+            remarks=list(self.remarks),
+            open_requests=sorted(self.requests),
+            voted=sorted(self.voted),
+            llm_calls_left=self.calls_left,
+        )
+        if journal.ENABLED:
+            try:
+                self.graphe.ecrire_json(journal.path().with_suffix(".graphe.json"))
+            except OSError:
+                pass
+
+    async def _decide(self, frame, send):
         kind, data = frame["type"], frame["data"]
         if kind == "snapshot":
             self.personal = data.get("self", {})
@@ -66,6 +97,7 @@ class Explorer:
                 and not self.turn_pending
                 and not self.staying()
             ):
+                journal.why("turn", reason="blocked")
                 await self.turn(send)
             await self.lie_down(send)
         elif kind == "vision":
@@ -116,6 +148,7 @@ class Explorer:
                 )
                 if votes and key not in self.voted:
                     choice = random.choice(votes)["choice_id"]
+                    source = "random"
                     seconds = (req["deadline_ms"] - time.time() * 1000) / 1000
                     if self.model and self.calls_left and seconds > 2:
                         from appel_modele import choose
@@ -131,9 +164,24 @@ class Explorer:
                                 votes,
                                 list(self.remarks),
                                 min(8, seconds - 1),
+                                self.graphe.resume(),
                             )
-                        except (OSError, ValueError, KeyError, IndexError, TypeError):
+                            source = "llm"
+                        except (OSError, ValueError, KeyError, IndexError, TypeError) as exc:
                             print("Décision locale pour ce scrutin.", flush=True)
+                            source = "random_after_llm_error:" + type(exc).__name__
+                    journal.why(
+                        "vote",
+                        request_id=key,
+                        kind=req["kind"],
+                        choice_id=choice,
+                        label=next(
+                            (v["label"] for v in votes if v["choice_id"] == choice), None
+                        ),
+                        source=source,
+                        llm_calls_left=self.calls_left,
+                        suspicions=self.graphe.resume(),
+                    )
                     cid = await send(
                         "act",
                         dict(
@@ -172,6 +220,7 @@ class Explorer:
             self.resting = True
         elif not self.asked_tonight:
             self.resting = self.asked_tonight = True
+            journal.why("return_home", reason="night", zones=self.personal.get("zones"))
             self.return_command = await send("act", {"action": "return_home"})
         await self.lie_down(send)
 
@@ -185,6 +234,7 @@ class Explorer:
         ):
             # On arrive chez soi tourné vers son lit, à portée : c’est le plus proche.
             # Un refus n’est pas retenté : l’exemple passe alors la nuit debout.
+            journal.why("sleep", bed=min(self.beds, key=self.beds.get), beds=self.beds)
             self.sleep_command = await send(
                 "act",
                 {"action": "sleep", "target_ref": min(self.beds, key=self.beds.get)},
@@ -208,9 +258,11 @@ class Explorer:
             return
         sectors = scan["distances_m"]
         center = len(sectors) // 2
-        if any(
-            d is not None and d < 1.4 for d in sectors[max(0, center - 2) : center + 3]
-        ):
+        front = [
+            d for d in sectors[max(0, center - 2) : center + 3] if d is not None
+        ]
+        if front and min(front) < 1.4:
+            journal.why("turn", reason="obstacle", front_m=min(front))
             await self.turn(send)
         elif self.personal.get("gait") == "stop":
             await send("move", {"gait": "walk", "bearing_deg": 0})
@@ -239,6 +291,8 @@ async def main():
         else f"conseil-1/{opts.model}/{opts.max_appels}",
         Explorer(opts.model, opts.max_appels).decide,
     )
+    journal.session("start", agent_version=agent.version, trace=str(journal.path()))
+    print("Journal :", journal.path(), flush=True)
     while True:
         try:
             await agent.run_once()

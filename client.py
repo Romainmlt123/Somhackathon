@@ -7,6 +7,8 @@ from collections import deque
 
 from websockets.asyncio.client import connect
 
+import journal
+
 
 class Inbox:
     def __init__(self, limit=256):
@@ -39,6 +41,7 @@ class Agent:
 
     async def send(self, kind, data, command_id=None):
         command_id = command_id or uuid.uuid4().hex
+        journal.act(kind, command_id, data)
         frame = json.dumps(dict(type=kind, command_id=command_id, data=data))
         self.pending[command_id] = frame
         await self.socket.send(frame)
@@ -51,12 +54,14 @@ class Agent:
             max_size=2**20,
         ) as ws:
             self.socket = ws
+            journal.session("connect", agent_version=self.version)
             await ws.send(json.dumps({"type": "hello", "agent_version": self.version}))
             inbox = Inbox()
 
             async def reader():
                 async for message in ws:
                     frame = json.loads(message)
+                    journal.perceive(frame)
                     if frame["type"] == "command_result":
                         self.pending.pop(frame["data"]["command_id"], None)
                     inbox.put(frame)
@@ -65,15 +70,21 @@ class Agent:
                 first = await inbox.get()
                 for message in list(self.pending.values()):
                     await ws.send(message)
+                journal.handled(first)
                 await self.decide(first, self.send)
                 while True:
-                    await self.decide(await inbox.get(), self.send)
+                    frame = await inbox.get()
+                    journal.handled(frame)
+                    await self.decide(frame, self.send)
 
             tasks = [asyncio.create_task(reader()), asyncio.create_task(decisions())]
             try:
                 done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
                 for task in done:
                     task.result()
+            except BaseException as exc:
+                journal.session("disconnect", error=repr(exc))
+                raise
             finally:
                 for task in tasks:
                     task.cancel()

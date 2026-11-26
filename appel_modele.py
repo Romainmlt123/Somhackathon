@@ -2,9 +2,12 @@
 
 import json
 import os
+import time
 from urllib.request import Request, urlopen
 
 from dotenv import load_dotenv
+
+import journal
 
 
 def complete(model, messages, *, max_tokens=16, timeout=8):
@@ -23,17 +26,29 @@ def complete(model, messages, *, max_tokens=16, timeout=8):
             "Content-Type": "application/json",
         },
     )
-    with urlopen(req, timeout=timeout) as response:
-        return json.load(response)["choices"][0]["message"]["content"] or ""
+    start = time.time()
+    try:
+        with urlopen(req, timeout=timeout) as response:
+            payload = json.load(response)
+        answer = payload["choices"][0]["message"]["content"] or ""
+    except Exception as exc:
+        journal.event("llm_error", model=model, messages=messages, error=repr(exc),
+                      latency_s=round(time.time() - start, 2))
+        raise
+    journal.event("llm", model=model, messages=messages, answer=answer,
+                  usage=payload.get("usage"), latency_s=round(time.time() - start, 2))
+    return answer
 
 
-def choose(model, kind, name, role, choices, remarks, timeout):
+def choose(model, kind, name, role, choices, remarks, timeout, suspicions=""):
     situation = {
         "scrutin": kind,
         "habitant": name,
         "rôle": role,
         "candidats": [v["label"] for v in choices],
         "paroles entendues": remarks,
+        # Tiré du graphe de connaissances : probabilité d’être loup et ses motifs.
+        "soupçons": suspicions,
     }
     text = complete(
         model,
