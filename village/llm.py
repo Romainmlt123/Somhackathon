@@ -12,19 +12,20 @@ DEFAULT_MODEL = "meta-llama/llama-3.1-8b-instruct"   # ~0,05 $ / million de jeto
 
 
 class LLM:
-    def __init__(self, model=None, max_tokens=260, temperature=0.7, timeout=12.0):
+    def __init__(self, model=None, max_tokens=None, temperature=0.7, timeout=60.0):   # max_tokens=None : aucune limite de réponse
         self.model = model or os.environ.get("MODEL") or DEFAULT_MODEL
         self.max_tokens, self.temperature, self.timeout = max_tokens, temperature, timeout
-        self.reasoning_none = True          # « sans réflexion » : les jetons de réflexion se paient et mangent la réponse
+        self.effort = "none"                # « none » si le modèle l'accepte ; Gemini 4 l'impose : repli sur « minimal »
         self.calls = 0
         self.cost = 0.0
         self.tokens_in = self.tokens_out = 0
 
     def _post(self, system, user):
-        body = {"model": self.model, "max_tokens": self.max_tokens, "temperature": self.temperature,
+        body = {"model": self.model, "temperature": self.temperature,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
-        if self.reasoning_none:
-            body["reasoning"] = {"effort": "none"}
+        if self.max_tokens:
+            body["max_tokens"] = self.max_tokens
+        body["reasoning"] = {"effort": self.effort}
 
         def call():
             req = Request(os.environ["LLM_GATEWAY_URL"] + "/chat/completions", json.dumps(body).encode(),
@@ -34,9 +35,9 @@ class LLM:
         try:
             return call()
         except HTTPError as e:
-            if e.code == 400 and self.reasoning_none:        # le fournisseur ne connaît pas ce paramètre : on s'en passe
-                self.reasoning_none = False
-                body.pop("reasoning", None)
+            if e.code == 400 and self.effort == "none":      # réflexion obligatoire sur ce modèle : on la réduit au minimum
+                self.effort = "minimal"
+                body["reasoning"] = {"effort": "minimal"}
                 return call()
             raise
 
