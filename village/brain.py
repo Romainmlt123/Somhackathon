@@ -17,6 +17,7 @@ import journal
 import moteur
 from graphe import Graphe
 
+from . import parler
 from .geometry import local_to_world, polar_to_local
 from .llm import parse_json
 from .persona import system_prompt
@@ -343,6 +344,11 @@ class Brain:
                 parole = self.parole_moteur()
                 if parole:
                     say, volume, regle = parole.texte, parole.volume, parole.regle
+                if say:        # compétence « parler » : une réplique de random_sentences.md s'ajoute au hasard
+                    say, ajout = parler.habiller(say, accepte=lambda p: moteur.nettoyer(
+                        p, self.moteur.secrets, self.st.role, self.rules.meute) is not None)
+                    if ajout:
+                        journal.why("phrase_aleatoire", ajout=ajout)
                 # C5, C7, L4 : 240 caractères, jamais le jeton, aucun mot qui trahit un loup.
                 filtre = moteur.nettoyer(say, self.moteur.secrets, self.st.role, self.rules.meute) if say else None
                 if say and filtre is None:
