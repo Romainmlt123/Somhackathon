@@ -13,6 +13,7 @@ class LLM:
     def __init__(self, model=None, max_tokens=260, temperature=0.7, timeout=12.0):
         self.model = model or os.environ.get("MODEL") or DEFAULT_MODEL
         self.max_tokens, self.temperature, self.timeout = max_tokens, temperature, timeout
+        self.reasoning_none = True          # « sans réflexion » : les jetons de réflexion se paient et mangent la réponse
         self.calls = 0
         self.cost = 0.0
         self.tokens_in = self.tokens_out = 0
@@ -20,10 +21,22 @@ class LLM:
     def _post(self, system, user):
         body = {"model": self.model, "max_tokens": self.max_tokens, "temperature": self.temperature,
                 "messages": [{"role": "system", "content": system}, {"role": "user", "content": user}]}
-        req = Request(os.environ["LLM_GATEWAY_URL"] + "/chat/completions", json.dumps(body).encode(),
-                      headers={"Authorization": "Bearer " + os.environ["TEAM_TOKEN"], "Content-Type": "application/json"})
-        with urlopen(req, timeout=self.timeout) as r:
-            return json.load(r)
+        if self.reasoning_none:
+            body["reasoning"] = {"effort": "none"}
+
+        def call():
+            req = Request(os.environ["LLM_GATEWAY_URL"] + "/chat/completions", json.dumps(body).encode(),
+                          headers={"Authorization": "Bearer " + os.environ["TEAM_TOKEN"], "Content-Type": "application/json"})
+            with urlopen(req, timeout=self.timeout) as r:
+                return json.load(r)
+        try:
+            return call()
+        except HTTPError as e:
+            if e.code == 400 and self.reasoning_none:        # le fournisseur ne connaît pas ce paramètre : on s'en passe
+                self.reasoning_none = False
+                body.pop("reasoning", None)
+                return call()
+            raise
 
     async def chat(self, system, user):
         """Renvoie (texte, usage). Lève OSError / ValueError en cas d'échec (crédit épuisé : HTTP 402)."""

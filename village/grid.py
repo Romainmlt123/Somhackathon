@@ -169,7 +169,8 @@ class Grid:
         if not free:
             self.dropped.clear()
             return None
-        return center(min(free, key=lambda c: math.dist(center(c, ZONE), pos)), ZONE)
+        # proche de nous, mais on reste autour du village (centre des repères) plutôt que de dériver dans le vide
+        return center(min(free, key=lambda c: math.dist(center(c, ZONE), pos) + 0.8 * math.dist(center(c, ZONE), mid)), ZONE)
 
     def drop(self, p):
         self.dropped.add(cell(p, ZONE))

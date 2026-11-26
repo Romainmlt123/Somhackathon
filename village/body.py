@@ -14,7 +14,8 @@ import random
 import time
 
 from .geometry import local_to_world, norm, polar_to_local, world_to_polar
-from .grid import ray
+from .grid import ZONE, ray
+from .grid import cell as grid_cell
 
 log = logging.getLogger("village.body")
 
@@ -194,6 +195,8 @@ class Body:
     async def goto(self, target, stop=1.5, gait="walk", timeout=40.0, through=0.0):
         """Marche jusqu'à `stop` mètres de la cible. Trajet A* sur la grille d'obstacles, évitement réactif par le scan.
         through > 0 : on vise un passage (porte) et on exige de voir au moins `through` m au-delà. True si arrivé."""
+        if self.st.posture in ("sitting", "sleeping"):
+            await self.stand()                  # assis ou couché, on ne marche pas
         if not self.w.heading_known:
             await self.localize()               # le cap est perdu (après s'être assis) : tour d'horizon sur deux repères
         grid = self.st.grid
@@ -435,8 +438,13 @@ class Body:
                 x, y, _ = self.w.pose
                 ang = random.uniform(0, 360)
                 best = (x + leg * math.sin(math.radians(ang)), y + leg * math.cos(math.radians(ang)))
-            if not await self.goto(best, stop=2.5, gait=gait, timeout=25):
+            if await self.goto(best, stop=2.5, gait=gait, timeout=25):
+                # arrivé : regard circulaire pour découvrir ce qui est autour (le balayage ne couvre que l'avant)
+                self.st.grid.seen.add(grid_cell(best, ZONE))
+                await self.scan_around(3)
+            else:
                 self.st.grid.drop(best)                      # zone inaccessible : on n'y retourne pas
+            await asyncio.sleep(0)                           # jamais de boucle sans rendre la main
             self.w.save()
         await self.stop()
         return until() if until else True
