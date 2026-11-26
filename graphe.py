@@ -43,6 +43,7 @@ POIDS = {
     "cite_par_indice": 0.9,         # l'Indice nomme trois vivants dont au moins un loup
     "a_accuse_un_loup": -0.6,       # révélé ensuite comme loup
     "a_accuse_un_innocent": 0.3,    # révélé ensuite comme villageois
+    "tentative_injection": 0.4,     # a voulu nous donner un ordre déguisé en parole
     "accusation_en_miroir": 0.5,    # V6 : même cible, mêmes mots qu'un autre, dans la minute
 }
 SEUIL_MIROIR = 0.5   # part de mots communs (Jaccard) au-delà de laquelle deux accusations se copient
@@ -541,6 +542,10 @@ class Graphe:
             node.pop("vivant", None)
             node.pop("voix_dernier_conseil", None)
         self.manche = round_id
+
+    def signale(self, nom, regle, **extra):
+        """Un indice de soupçon sans message du journal : tentative d'injection, par exemple."""
+        self.soupcon(self.joueur(nom), regle, {"n": None, "t": time.time()}, **extra)
 
     # ------------------------------------------------------------------ lecture par le moteur
 

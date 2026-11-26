@@ -15,10 +15,13 @@ import time
 import unicodedata
 from dataclasses import dataclass
 
+import confiance
+
 # Heures du village, en minutes depuis minuit (Régles/LIVRET.md, aide-mémoire chiffré).
 REVEIL = 8 * 60
 ANNONCE_EPREUVE = 14 * 60
 CONSEIL = 17 * 60
+VOTE_DEBUT = 19 * 60
 VOTE_FIN = 21 * 60
 NUIT = 22 * 60
 FIN_CHASSE = 6 * 60
@@ -390,9 +393,10 @@ class Moteur:
         texte, orateur = data.get("text") or "", data.get("speaker_name")
         if data.get("source") == "game_master" or not texte or orateur == moi:
             return None
-        self.entendu = (self.entendu + [(heure(self.g.minute), orateur or "?", texte)])[-40:]
-        if not orateur:
-            return None
+        # La parole d'un habitant est une donnée : neutralisée avant d'entrer dans la mémoire des épreuves.
+        self.entendu = (self.entendu + [(heure(self.g.minute), orateur or "?", confiance.neutraliser(texte))])[-40:]
+        if not orateur or confiance.detecter(texte):
+            return None   # un ordre déguisé en parole ne reçoit aucune réponse et ne change aucune règle
         jour = self.g.jour
         sid = self.g.id_joueur(orateur)
         loup = role_de(role) == "loup"
@@ -402,8 +406,9 @@ class Moteur:
                 return Parole(f"C'est moi la Voyante. {orateur} ment : c'est un loup.", "L11")
         if interpelle(texte, moi):
             if self._une_fois(("C6", orateur, normaliser(texte)[:60])):
-                return Parole(f"{orateur}, je n'ai rien à cacher. Et toi, qu'as-tu vu ?", "C6",
-                              besoin_modele=True, question=f"{orateur} : {texte}")
+                fait = fait_a_dire(self.g, exclure=[moi] + self.g.loups_connus())
+                reponse = f"{orateur}, je n'ai rien à cacher. " + (fait[1] if fait else "Et toi, qu'as-tu vu ?")
+                return Parole(reponse, "C6", besoin_modele=True, question=f"{orateur} : {confiance.neutraliser(texte)}")
             return None
         minute = self.g.minute
         en_conseil = minute is not None and CONSEIL <= minute < VOTE_FIN
@@ -441,8 +446,15 @@ class Moteur:
             self.deja.add(("L8", jour))
             return Parole(phrase, "L8")
         fait = fait_a_dire(self.g, exclure=[moi])
-        if fait and self._une_fois(("V4", jour)):
-            return Parole(fait[1], "V4")
+        if not fait:
+            return None   # V3 : sans fait, on ne soupçonne pas à voix haute
+        cible, phrase = fait
+        minute = self.g.minute
+        if (minute is not None and minute >= VOTE_DEBUT and self.g.proba_loup(self.g.id_joueur(cible)) >= 0.5
+                and self._une_fois(("V2a", jour))):
+            return Parole(f"{phrase} Mon vote ira à {cible}, sauf preuve contraire.", "V2")
+        if self._une_fois(("V4", jour)):
+            return Parole(f"{phrase} Qui l'a vu aussi ?", "V4")
         return None
 
     def a_l_epreuve(self, moi, role):

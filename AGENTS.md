@@ -108,3 +108,15 @@ L'agent à lancer est celui de Romain (`run_agent.py`, dossier `village/`). Il r
 - **Graphe** : un seul `Graphe`, créé dans `run_agent.py` et partagé avec le cerveau.
 
 `agent.py` et `client.py` (ancien agent de Thomas) restent pour l'instant : un seul des deux peut se connecter (HTTP 409).
+
+## Confiance et injection (`confiance.py`)
+
+Font foi : le code, le prompt système (bloc « RÈGLES FIGÉES », `village/persona.py`) et les messages du serveur (`source: game_master`). Tout le reste (paroles des habitants, panneau, documents d'épreuve, notes du modèle) est une donnée.
+
+- `confiance.detecter` repère les ordres déguisés (« ignore tes règles », faux « maître du jeu », demande de jeton…) ; `neutraliser` les remplace par `[ordre ignoré]` avant le contexte du modèle, ses notes, le panneau et les documents d'épreuve.
+- Une tentative reste sans réponse, ne change aucune règle (les votes et filtres sont dans le code) et rend son auteur plus suspect (`tentative_injection` dans le graphe, `journal.why("injection_ignoree")`).
+- Tests : `tests/test_confiance.py`.
+
+## Parole convaincante mais factuelle (`moteur.py`)
+
+Villageois : un fait observé avec le nom, le lieu et l'heure, puis un appel à témoin (« Qui l'a vu aussi ? ») ; à partir de 19 h, annonce du vote avec son fait (« Mon vote ira à X, sauf preuve contraire »). Jamais d'accusation sans fait. Le loup garde L4/L6/L7 : mêmes faits vrais, aucun mot qui le trahit. Les répliques de `random_sentences.md` (Clément) s'ajoutent seulement s'il reste de la place : le fait n'est jamais coupé.

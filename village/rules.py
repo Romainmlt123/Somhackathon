@@ -10,6 +10,7 @@ import logging
 import random
 import time
 
+import confiance
 import epreuves
 import journal
 import moteur
@@ -352,7 +353,7 @@ class Rules:
             choices = ", ".join(f"{c['choice_id']}={c['label']}" for c in act.get("choices", []))
             for step in range(3):
                 d = await self.ask(
-                    f"ÉPREUVE IA (format {fmt}). ÉNONCÉ : {prompt[:1500]}\n"
+                    f"ÉPREUVE IA (format {fmt}). ÉNONCÉ : {confiance.document_sur(prompt)[:1500]}\n"
                     + (f"CHOIX : {choices}\n" if choices else "")
                     + f"OUTILS DE CALCUL (exacts) : {challenges.TOOL_HELP}\n{scratch}"
                     'Réponds {"outil": null ou {"nom": "...", "args": [...]}, "reponse": "valeur seule, sans phrase", "pensee": ""}. '
