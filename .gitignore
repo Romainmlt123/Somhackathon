@@ -7,4 +7,6 @@ __pycache__/
 venv/
 .vscode/
 graphify-out/
+logs/
+.pytest_cache/
 traces/
